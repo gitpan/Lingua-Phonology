@@ -1,0 +1,22 @@
+                  Lingua::Phonology
+
+This module allows for the creation and manipulation of language
+phonologies computationally. It consists of a top-level module,
+Lingua::Phonology, and several sub-modules.
+
+Documentation for all of these modules can be found on CPAN, or in the
+manual pages.
+
+Install:
+
+On Unix and its kin, unzip and untar the package. This will create a
+temporary directory like 'Lingua-Phonology-0.00', where "0.00" will represent
+the current version number. Change to that directory and run:
+
+perl Makefile.PL && make && make test && make install
+
+That should be all that's needed. Alternately, you can just use the CPAN
+perl module, which will do all of this for you.
+
+There's no reason for Lingua::Phonology not to work on other OS's, but
+you're on your own for installation if your OS doesn't support make.

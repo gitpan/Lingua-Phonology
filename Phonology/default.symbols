@@ -1,0 +1,65 @@
+# Symbol definitions
+# Labial
+p	labial
+b	labial voice
+f	labial +continuant
+v	labial voice +continuant
+m	labial nasal
+
+# Dental and alveolar
+t	+anterior -distributed
+d	+anterior -distributed voice
+s	+anterior -distributed +continuant
+z	+anterior -distributed voice +continuant 
+T	+anterior +distributed +continuant
+D	+anterior +distributed voice +continuant
+n	+anterior -distributed sonorant nasal
+l	+anterior -distributed sonorant lateral
+r	+anterior -distributed sonorant
+
+# Palato-alveolar
+tS	-anterior +distributed 
+dZ	-anterior +distributed voice
+S	-anterior +distributed +continuant
+Z	-anterior +distributed +continuant voice
+
+# Retroflex
+t`	-anterior -distributed
+d`	-anterior -distributed voice
+s`	-anterior -distributed +continuant
+z`	-anterior -distributed +continuant voice
+n`	-anterior -distributed nasal
+r`	-anterior -distributed sonorant *nasal *lateral
+
+# Velar
+k	dorsal
+g	dorsal voice
+x	dorsal +continuant
+G	dorsal voice +continuant
+N	dorsal nasal
+
+# Vowels
+# High vowels
+i	vocoid aperture=0 -anterior tense
+I	vocoid aperture=0 -anterior 
+u	vocoid aperture=0 dorsal labial tense
+U	vocoid aperture=0 dorsal labial 
+y	vocoid aperture=0 -anterior labial tense
+Y	vocoid aperture=0 -anterior labial 
+M	vocoid aperture=0 dorsal labial
+1	vocoid aperture=0
+}	vocoid aperture=0 labial
+
+# Mid vowels
+e	vocoid aperture=1 -anterior tense
+E	vocoid aperture=1 -anterior 
+o	vocoid aperture=1 dorsal labial tense
+O	vocoid aperture=1 dorsal labial
+2	vocoid aperture=1 -anterior labial tense
+9	vocoid aperture=1 -anterior labial
+@	vocoid aperture=1
+8	vocoid aperture=1 labial
+
+# Low vowels
+a	vocoid aperture=2
+Q	vocoid aperture=2 labial

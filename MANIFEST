@@ -1,0 +1,14 @@
+MANIFEST
+README
+TODO
+Makefile.PL
+Phonology.pm
+Phonology/Default.pm
+Phonology/Features.pm
+Phonology/PseudoSegment.pm
+Phonology/Rules.pm
+Phonology/Segment.pm
+Phonology/Symbols.pm
+Phonology/default.features
+Phonology/default.symbols
+t/phono.t

@@ -1,0 +1,13 @@
+Things I'd like to improve:
+
+* Have better handling of suprasegmentals, rather than the hackish,
+unintuitive way it's done now. Ideally, we should be able to specify which
+segment is the head of a suprasegmental group (like a syllable or foot),
+and let the suprasegment have properties of its own unrelated to the
+segments beneath it.
+
+* Provide a library of functions to be used in rules. These should provide
+simple implementations of common linguistic processes, like assimilate(),
+dissimilate(), etc.
+
+* Someday in the far future, add Optimality Theory to the module.
