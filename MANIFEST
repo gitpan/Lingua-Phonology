@@ -4,6 +4,7 @@ README
 TODO
 Makefile.PL
 Phonology.pm
+Phonology/Common.pm
 Phonology/Features.pm
 Phonology/FileFormatPOD.pm
 Phonology/Functions.pm
