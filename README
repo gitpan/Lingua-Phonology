@@ -1,4 +1,4 @@
-Phonology version 0.11
+Phonology version 0.3
 ======================
 
 This module allows for the creation and manipulation of language
@@ -27,22 +27,29 @@ most of these steps.
 
 DEPENDENCIES
 
-Lingua::Phonology::Rules no longer depends on any other modules to run.
-However, it does include two recommended modules: Whatif and Graph. Graph is a
-standard Perl module and is probably available on your system. Whatif may be
-downloaded from CPAN if it isn't already available.
+XML::Simple v2.08
 
-If these modules *are* available, then you will get a few unexpected success
-messages when running make test, as if a TODO test had succeeded. These tests
-aren't actually TODO, though--they're only marked as such to indicate their
-optional nature. 
+Parse::RecDescent v1.9
+
+B::Deparse v0.63
+
+Recommended:
+
+Whatif v1.0
+
+Graph v0.2
+
+If the recommended  modules are available, then you will get a few unexpected
+success messages when running make test, as if a TODO test had succeeded. These
+tests aren't actually TODO, though--they're only marked as such to indicate
+their optional nature. 
 
 If these modules aren't available, you don't lose much--just one method from
 Lingua::Phonology::Features, and one parameter in Lingua::Phonology::Rules.
 
 COPYRIGHT AND LICENSE
 
-Copyright (C) 2003 Jesse Bangs
+Copyright (C) 2003-2004 Jesse Bangs
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself. 

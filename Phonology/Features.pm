@@ -12,26 +12,42 @@ features.
 	use Lingua::Phonology;
 
 	my $phono = new Lingua::Phonology;
-
 	my $features = $phono->features;
-	$features->loadfile;                  # Load default features
+
+    # Add features programmatically
+    $features->add_feature(
+        Node =>      { type => 'privative', children => ['Scalar', 'Binary', 'Privative'] },
+        Scalar =>    { type => 'scalar' },
+        Binary =>    { type => 'binary' },
+        Privative => { type => 'privative' }
+    );
+
+    # Drop features
+    $features->drop_feature('Privative');
+
+    # Load feature definitions from a file
+	$features->loadfile('phono.xml');
+
+    # Load default features
+    $features->loadfile;
+
 
 =head1 DESCRIPTION
 
-Lingua::Phonology::Features holds a list of hierarchically arranged 
-features of various types, and includes methods for adding and deleting
-features and changing the relationships between them.
+Lingua::Phonology::Features allows you to create a hierarchy of features of
+various types, and includes methods for adding and deleting features and
+changing the relationships between them.
 
 By "heirarchical features" we mean that some features dominate some other
-features, as in a tree. By having heirarchical features, it becomes 
-possible to set multiple features at once by assigning to a node, and to
-indicate conceptually related features that are combined under the same
-node. However, the assignment of values to features is not handled by this
-module--that's the job of Lingua::Phonology::Segment.
+features, as in a tree. By having heirarchical features, it becomes possible to
+set multiple features at once by assigning to a node, and to indicate
+conceptually related features that are combined under the same node. This
+module, however, does not instantiate values of features, but only establishes
+the relationships between features.
 
-Lingua::Phonology::Features also recognizes multiple types of features.
-Features may be privative (which means that their legal values are either true
-or undef), binary (which means they may be true, false, or undef), or scalar
+Lingua::Phonology::Features recognizes multiple types of features.  Features
+may be privative (which means that their legal values are either true or
+C<undef>), binary (which means they may be true, false, or C<undef>), or scalar
 (which means that their legal value may be anything). You can freely mix
 different kinds of features into the same set of features.
 
@@ -47,463 +63,362 @@ use strict;
 use warnings;
 use warnings::register;
 use Carp;
+use Lingua::Phonology::Common;
+
+sub err ($) { warnings::warnif(shift); return; }
 
 our $VERSION = 0.2;
 
-# Get Graph if present
-our $GRAPH;
-BEGIN {
-	$GRAPH = eval 'use Graph; 1';
-}
+# %valid defines valid feature types
+my %valid = (
+    privative => 1,
+    binary => 1,
+    scalar => 1,
+    node => 1
+);
 
-=head1 METHODS
-
-=head2 new
-
-This method creates and returns a new Features object. It takes no arguments.
-
-=cut
-
+# Constructor
 sub new {
 	my $proto = shift;
 	my $class = ref($proto) || $proto;
-	my $self = { }; # $self can be a single-layer hash
-	bless $self, $class;
-	return $self;
-} # end new
+	bless {}, $class;
+}
 
-=head2 add_feature
-
-Adds a new feature to the current list of features. Accepts a list of
-arguments of the form "feature_name => { ... }", where the value assigned
-to each feature name must be a hash reference with one or more of the
-following keys:
-
-=over 4
-
-=item *
-
-B<type> -- The type must be one of 'privative', 'binary', 'scalar', or
-'node'.  The feature created is of the type specified. This key must be
-defined for all features.
-
-=item *
-
-B<child> -- This is only relevant if the feature type is a node. The value
-for this key is a reference to an array of feature names. The features
-named will be assigned as the children of the feature being defined.
-
-=item *
-
-B<parent> -- The inverse of C<child>. The value for this key must be a 
-reference to an array of feature names that are assigned as the parents
-of the feature being added.
-
-=back
-
-Note that the features named in C<parent> or C<child> must already be
-defined when the new feature is added. Thus, trying to add parents and
-children as part of the same call to add_feature() will almost certainly
-result in errors.
-
-This method returns a list of all of the current features after new
-features have been added.
-
-Example:
-
-	use Lingua::Phonology::Features;
-	my $features = new Lingua::Phonology::Features;
-
-	$features->add_feature( anterior => { type => 'binary' },
-	                        distributed => { type => 'binary' });
-	$features->add_feature( Coronal => { type => 'node', child => ['anterior', 'distributed']});
-
-B<WARNING>: The following feature names are used by Lingua::Phonology::Rules
-and should not be included as part of user feature sets: C<BOUNDARY, _RULE,
-INSERT_RIGHT, INSERT_LEFT>. Also, the features C<SYLL, Rime, onset, nucleus,
-coda, sonority> are used by Lingua::Phonology::Syllable. They may be defined as
-part of a user feature set, but their original definitions may be overwritten.
-
-=cut
-
-# %valid defines valid feature types
-our %valid = (	privative => 1,
-				binary => 1,
-				scalar => 1,
-				node => 1
-				);
-
+# Add features to our set
 sub add_feature {
 	my $self = shift;
 	my %hash = @_;
+    my $err = 0;
 
-	# Do this for each key of the hashref you're given
 	FEATURE: for (keys(%hash)) {
-		# Check that the values for each key are also hashrefs
-		if (ref($hash{$_}) ne 'HASH') {
+		unless (_is($hash{$_}, 'HASH')) {
 			err("Bad value for $_");
-			next FEATURE;
-		} # end if
-
-		# Carp if you're not given the type feature for each item	
-		if (not $hash{$_}{type}) {
-			err("No type given for feature '$_'");
-			next FEATURE;
-		} # end if
-
-		# Check and carp if you're not given a proper type
-		$hash{$_}{type} = lc $hash{$_}{type};
-		if (not $valid{$hash{$_}{type}}) {
-			err("Unrecognized type '$hash{$_}{type}' for feature $_");
-			next FEATURE;
-		} # end unless
-		
-		# If you've made it through above, add just the feature and type
-		$self->{$_}->{type} = $hash{$_}{type};
-
-		# The next section needs less strictness to avoid fatal errors when bad
-		# arguments are passed
-		no strict 'refs';
-
-		# Handle children via add_child method
-		err("Bad value for child of $_")
-			if ($hash{$_}{child} && ref($hash{$_}{child}) ne 'ARRAY');
-		for my $child (@{$hash{$_}{child}}) {
-			$self->add_child($_, $child);
-		} # end for
-
-		# Handle parents via add_parent method
-		err("Bad value for parent of $_")
-			if ($hash{$_}{parent} && ref($hash{$_}{parent}) ne 'ARRAY');
-		for my $parent (@{$hash{$_}{parent}}) {
-			$self->add_parent($_, $parent);
-		} # end for
-
-	} # end for
-
-	# Return the new list of features
-	return keys(%$self);
-} # end add_feature
-
-=head2 feature
-
-Given the name of a feature, returns a hash reference showing the current
-settings for that feature. The hash reference will at least contain the
-key 'type', naming the feature type, and may contain the key 'child' if
-the feature is a node.
-
-=cut
-
-sub feature {
-	my $self = shift;
-	my $feature = shift;
-	return $self->{$feature} if exists($self->{$feature});
-	return err("No such feature '$feature'");
-} # end feature
-
-=head2 feature_exists 
-
-Given the name of the feature, returns a simple truth value indicating whether
-or not any such feature with that name currently exists. Unlike feature(), this
-method never gives an error, and does not return the feature reference on
-success. This can be used by programs that want to quickly check for the
-existence of a feature without the possibility of errors.
-
-=cut
-
-sub feature_exists {
-	my $self = shift;
-	return exists $self->{$_[0]};
-}
-
-=head2 drop_feature
-
-Given the name of a feature, deletes the given feature from the current
-list of features. Note that deleting a node feature does not cause its
-children to be deleted--it just causes them to revert to being
-undominated. This method always returns true.
-
-=cut
-
-sub drop_feature {
-	my $self = shift;
-	delete($self->{$_}) for @_;
-	return 1; # always return true
-} # end drop_feature
-
-=head2 change_feature
-
-This method works identically to add_feature(), but it first checks to see
-that the feature being changed already exists. If it doesn't, it will give
-an error. If every attempted change given to this function succeeds, then
-this method returns 1. Otherwise, it returns 0.
-
-The add_feature() method can also be used to change existing features--this
-method exists only to aid readability.
-
-=cut
-
-sub change_feature {
-	my $self = shift;
-	my %hash = @_;
-	my $return = 1;
-
-	FEATURE: for (keys(%hash)) {
-		# Check that there is such a feature
-		if (not $self->feature($_)) {
-			$return = 0;
+            $err = 1;
 			next FEATURE;
 		}
 
-		# Pass the buck to add_feature
-		$self->add_feature($_ => $hash{$_}) or $return=0;
-	} # end for
-	return $return;
-} # end change_feature
+        # Error checking--these invalidate the whole feature
+        if (not $hash{$_} = _check_featureref($_, $hash{$_})) {
+            $err = 1;
+            next FEATURE;
+        }
 
-=head2 all_features
+        # Drop any old feature
+        $self->drop_feature($_) if $self->feature_exists($_);
 
-Takes no arguments. Returns a hash with feature names as its keys, and the
-parameters for those features as its values.
+        # Add the new feature
+        $self->_add_featureref($_, $hash{$_}) or $err = 1;
+    }
 
-=cut
+	return $err ? () : 1;
+} 
+
+# Change an existing feature. Same as add_feature(), but checks that the
+# feature exists first
+sub change_feature {
+	my ($self, %hash) = @_;
+	my $err = 0;
+
+	FEATURE: for (keys(%hash)) {
+		if (not $self->feature($_)) {
+            $err = 1;
+			next FEATURE;
+		}
+
+        if (not _is($hash{$_}, 'HASH')) {
+            err "Bad value for $_";
+            $err = 1;
+            next FEATURE;
+        }
+
+        # Check the href
+        if (not $hash{$_} = _check_featureref($_, $hash{$_})) {
+            $err = 1;
+            next FEATURE;
+        }
+
+        # Add the ref
+        $self->_add_featureref($_, $hash{$_}) or $err = 1;
+
+	} 
+	return $err ? () : 1;
+}
+
+# Private -- check a hashref
+sub _check_featureref {
+    my ($name, $ref) = @_;
+
+    # Check types
+    $ref->{type} = lc $ref->{type};
+    if (not $valid{$ref->{type}}) {
+        return err("Invalid feature type '$ref->{type}' for feature $name");
+    }
+    $ref->{type} = 'privative' if $ref->{type} eq 'node';
+
+    # Check children
+    if ($ref->{child} && not _is($ref->{child}, 'ARRAY')) {
+        return err("Bad value for child of $name");
+    }
+    $ref->{child} ||= [];
+
+    # Check parents
+    if ($ref->{parent} && not _is($ref->{parent}, 'ARRAY')) {
+        return err("Bad value for parent of $name");
+    }
+    $ref->{parent} ||= [];
+
+    # All OK
+    return $ref;
+}
+
+# Private -- apply a hashref
+sub _add_featureref {
+    my ($self, $name, $ref) = @_;
+    my $err = 0;
+
+    $self->{$name}->{type} = $ref->{type};
+    $self->{$name}->{child} = {};
+    $self->{$name}->{parent} = {};
+    $self->add_child($name, @{$ref->{child}}) or $err = 1;
+    $self->add_parent($name, @{$ref->{parent}}) or $err = 1;
+    return $err ? () : 1;
+}
+
+
+# Get a feature or get warned
+sub feature {
+	my ($self, $feature) = @_;
+	return $self->{$feature} if exists($self->{$feature});
+	return err("No such feature '$feature'");
+}
+
+# Check if a feature exists (w/o warnings)
+sub feature_exists {
+	my $self = shift;
+	exists $self->{$_[0]};
+}
+
+# Drop a feature
+sub drop_feature {
+	my $self = shift;
+    my $err = 0;
+    for my $drop (@_) {
+        # Remove references to this feature
+        $self->drop_child($drop, $self->children($drop)) or $err = 1;
+        $self->drop_parent($drop, $self->parents($drop)) or $err = 1;
+
+        # Remove the feature itself
+        delete $self->{$drop};
+    }
+    return $err ? () : 1;
+}
 
 sub all_features {
-	my $self = shift;
-	return %$self;
-} # end all_features
+	return %{$_[0]};
+}
 
-=head2 loadfile
-
-Takes one argument, the path and name of a file. Reads the lines of the
-file and adds all of the features defined therein. You can also call this
-method with no arguments, in which case the default feature set is loaded.
-
-Feature definition lines should be in this format:
-
-	feature_name   [1 or more tabs]   type   [1 or more tabs]   children (separated by spaces)
-
-You can order your features any way you want in the file. The method will
-take care of ensuring that parents are defined before their children are
-added and make sure no conflicts result.
-
-Lines beginning with a '#' are assumed to be comments are are skipped.
-
-If you don't provide any arguments to this feature, then the default
-feature set is read and loaded. The default feature set is described in
-L<"THE DEFAULT FEATURE SET">.
-
-=cut
-
-# Load feature definitions from a file
-sub loadfile {
-	my $self = shift;
-	my $file = shift;
-
-	no strict 'refs';
-	if ($file) {
-		open $file, $file or return err("Couldn't open $file: $!");
-	}
-	else {
-		# $file = Lingua::Phonology::Default::open('features');
-		$file = 'DATA';
-	} # end if/else
-
-	my (%children, %symbols);
-	while (<$file>) {
-		if (/^\s*([^#]\w+)\t+(\w+)(\t+(.*))?/) {
-			my ($name, $type, $children) = ($1, $2, $4);
-			@{$children{$name}} = split(/\s+/, $children) if ($children);
-
-			# Immediately add feature names
-			$self->add_feature($name => {type => $type});
-		} # end if
-
-	} # end while
-
-	# Now add children
-	for (keys(%children)) {
-		$self->add_child($_, @{$children{$_}});
-	} # end for
-	
-	if ($file eq 'DATA') {
-		seek $file, 0, 0;
-	}
-	else {
-		close $file;
-	}
-	return 1;
-
-} # end loadfile
-
-=head2 children
-
-Takes one argument, the name of a feature. Returns a list of all of the
-features that are children of the feature given.
-
-=cut
-
+# Get array of children
 sub children {
-	my $self = shift;
-	my $feature = shift;
-	my $featureref = $self->feature($feature) or return undef;
+	my ($self, $feature) = @_; 
+	my $featureref = $self->feature($feature) or return;
 
-	return @{$featureref->{child}} if ($featureref->{child}); # return a real array
-	return (); # Empty array otherwise
-} # end children
+	return keys %{$featureref->{child}};
+}
 
-=head2 add_child
-
-The first argument to this method should be the name of a node-type
-feature.  The remaining arguments are the names of features to be assigned
-as children to the first feature. If all children are added without errors,
-this function returns 1. Otherwise it returns false.
-
-=cut
-
+# Add a new child to a parent
 sub add_child {
-	my $self = shift;
-	my $parent = shift;
-	my $parentref = $self->feature($parent) or return undef;
-	my $return = 1;
+	my ($self, $parent, @children) = @_;
+	my $err = 0;
 
-	# Check that the parent is a node
-	return err("$parent is not a node") if ($parentref->{type} ne 'node');
+    # Check that parent exists
+    $self->feature($parent) or return;
 
-	CHILD: for my $child (@_) {
+	CHILD: for my $child (@children) {
 		# Check that the child feature exists
 		if (not $self->feature($child)) {
-			$return = 0;
+			$err = 1;
 			next CHILD;
 		}
 
-		# Check that you haven't already defined this child
-		for (@{$parentref->{child}}) {
-			if ($child eq $_) {
-				err("$child is already child of $parent");
-				next CHILD;
-			} # end if
-		} # end for
+		# Mark relations on parents and children
+        $self->{$parent}->{child}->{$child} = undef;
+        $self->{$child}->{parent}->{$parent} = undef;
+	}
 
-		# If you get this far, you're good to go
-		push(@{$parentref->{child}}, $child);
-	} # end for
+	return $err ? (): 1;
+}
 
-	return $return;
-} # end sub
-
-=head2 drop_child
-
-Like add_child, the first argument to this function should be the name of a
-node feature, and the remaining arguments are the names of children of that
-node. The child features so named will be deleted from the list of children
-for that node. This function returns a hash reference for the parent
-feature, showing the modifications to its C<child> key that have just been
-made, except when no such feature exists, in which case it gives an error.
-
-=cut
-
+# Get rid of a child
 sub drop_child {
-	my $self = shift;
-	my $parent = shift;
-	my $parentref = $self->feature($parent) or return undef;
+	my ($self, $parent, @children) = @_;
+    my $err = 0;
 
-	for my $child (@_) {
-		for (0 .. $#{$parentref->{child}}) {
-			delete($parentref->{child}->[$_]) if $parentref->{child}->[$_] eq $child;
-		} # end for
-	} # end for
-	return $parentref;
-} # end drop_child
+    # Check that parent exists
+    $self->feature($parent) or return;
 
-=head2 parents
+	CHILD: for my $child (@children) {
+        # Check that the child exists
+        if (not $self->feature($child)) {
+            $err = 1;
+            next CHILD;
+        }
 
-Takes one argument, the name of a feature. Returns a list of the current
-parent nodes of that feature.
+        # Remove marks
+        delete $self->{$parent}->{child}->{$child};
+        delete $self->{$child}->{parent}->{$parent};
+    }
 
-=cut
+	return $err ? () : 1;
+}
 
+# Get current parents
 sub parents {
-	my $self = shift;
-	my $feature = shift;
-	
-	my @parents;
-	my %features = $self->all_features;
-	for my $parent (keys(%features)) {
-		for ($self->children($parent)) {
-			push (@parents, $parent) if ($feature eq $_);
-		} # end for
-	} # end for
+	my ($self, $child) = @_;
+    my $childref = $self->feature($child) or return;
 
-	return @parents; 
-} # end parents
+    return keys %{$childref->{parent}};
+}
 
-=head2 add_parent
-
-Takes two or more arguments. The first argument is the name of a feature,
-and the remaining arguments are the names of nodes that should be parents
-of that feature. Returns true if all of the attempted operations succeeded,
-otherwise returns false. Note that a false return does not mean that all
-operations failed, only some.
-
-=cut
-
+# Add a parent
 sub add_parent {
-	my $self = shift;
-	my $child = shift;
-	my $return = 1;
+	my ($self, $child, @parents) = @_;
+	my $err = 0;
+
+    # Check that the child exists
+    $self->feature($child) or return;
 
 	# This action is identical to add_child, but with order of arguments switched
 	# So just pass the buck
-	for (@_) {
-		$self->add_child($_, $child) or $return = 0;
-	} # end for
-	return $return;
-} # end add_parent
+	for (@parents) {
+		$self->add_child($_, $child) or $err = 1;
+	}
+	return $err ? () : 1;
+}
 
-=head2 drop_parent
-
-Takes two or more arguments. The first is a feature name, and the remaining
-arguments are the names of features that are currently parents of that
-feature. Those features will cease to be parents of the first feature. This
-feature always returns a hash reference giving the properties of the child
-feature.
-
-=cut
-
+# Get rid of a parent
 sub drop_parent {
-	my $self = shift;
-	my $child = shift;
-	my @parents = @_;
+	my ($self, $child, @parents) = @_;
+    my $err = 0;
+
+    # Child exists?
+    $self->feature($child) or return;
 
 	# Once again, just pass to drop_child
 	for (@parents) {
-		$self->drop_child($_, $child);
-	} # end for
-	return $self->feature($child);
-} # end drop_parent
-
-=head2 graph
-
-Takes no arguments. Returns an object in class Graph indicating the structure
-of the current Lingua::Phonology::Features object. You may use this graph for
-printing or other analysis.
-
-You must have the Graph module installed for this function to work. If you do
-not have Graph installed, you will get an error.
-
-=cut
-
-sub graph {
-	# Bail if we don't have Graph
-	if (not $GRAPH) {
-		carp "Can't call graph: Graph module not available";
-		return undef;
+		$self->drop_child($_, $child) or $err = 1;
 	}
+
+	return $err ? () : 1;
+}
+
+# Get/set feature type
+sub type {
+	my ($self, $feature, $type) = @_;
+	$self->feature($feature) or return;
+
+	if ($type) {
+		# Check for valid types
+		return err("Invalid type $type") if (not $valid{$type});
+
+		# Otherwise:
+		$self->{$feature}->{type} = $type;
+	}
+	
+	# Return the current type
+	$self->{$feature}->{type};
+}
+
+# Load feature definitions from a file
+sub loadfile {
+	my ($self, $file) = @_;
+
+    my $parse;
+    # Load defaults when no file given
+    if (not defined $file) {
+        my $start = tell DATA;
+        my $string = join '', <DATA>;
+        eval { $parse = _parse_from_string($string, 'features') };
+        return err($@) if $@;
+        seek DATA, $start, 0;
+    }
+
+    # Load an actual file
+    else {
+        eval { $parse = _parse_from_file($file, 'features') };
+        if (!$parse) {
+            return $self->old_loadfile($file);
+        }
+    }
+
+    $self->_load_from_struct($parse);
+}
+
+# The parser for the old deprecated format
+sub old_loadfile {
+    my ($self, $file) = @_;
+
+    eval { $file = _to_handle($file, '<') };
+    return err($@) if $@;
+
+	my %children;
+	while (<$file>) {
+		s/\#.*$//; # Strip comments
+		if (/^\s*(\w+)\t+(\w+)(\t+(.*))?/) {
+			my ($name, $type, $children) = ($1, $2, $4);
+			no warnings 'uninitialized';
+			$self->add_feature($name => {type => $type});
+			$children{$name} = [ split /\s+/, $children ] if $children;
+		}
+
+	}
+
+	# Add kids
+	$self->add_child($_, @{$children{$_}}) for keys %children;
+
+	close $file;
+	return 1;
+}
+
+# Actually apply a structure to the object. Private, called by loadfile() and
+# Lingua::Phonology
+sub _load_from_struct {
+	my ($self, $parse) = @_;
+
+    # This line is perhaps too clever for its own good
+	my %children = map { $_ => delete($parse->{$_}->{child}) } keys %$parse;
+    my %parents = map { $_ => delete($parse->{$_}->{parent}) } keys %$parse;
+
+	$self->add_feature(%$parse);
+	$self->add_child($_, keys %{$children{$_}}) for keys %children;
+	$self->add_parent($_, keys %{$parents{$_}}) for keys %parents;
+	1;
+}
+
+# Return an XML representation of yourself
+sub _to_str {
+	my $self = shift;
+
+	# Construct an appropriate data structure
+	my $struct = {};
+	for (keys %$self) {
+        # Only make child attrs, not parent attrs
+		$struct->{$_}->{child} = [ map { { name => $_ } } keys %{$self->{$_}->{child}} ];
+        $struct->{$_}->{type} = $self->{$_}->{type};
+	}
+
+    return eval { _string_from_struct({ features => { feature => $struct } }) };
+}
+
+# Get a Graph object
+sub graph {
+    require Graph or do {
+		carp err "Can't call graph: Graph module not available";
+        return;
+	};
 
 	my $self = shift;
 
-	my $g = new Graph;
+	my $g = Graph->new();
 	for my $feature (keys %$self) {
 		$g->add_vertex($feature);
 		$g->set_attribute('type', $feature, $self->type($feature));
@@ -515,57 +430,349 @@ sub graph {
 	return $g;
 }
 
+# The following coderefs translate arbitrary data into numeric equivalents
+# respecting common linguistic abbreviations like [+foo, -bar, *baz]
+my %num_form = (
+	privative => sub {
+		return 1 if $_[0];
+		return undef;
+	},
+	binary =>sub {
+		my $value = shift;
+		# Text values
+		return 0 if ($value eq '-');
+		return 1 if ($value eq '+');
+		# Other values
+		return 1 if ($value);
+		return 0;
+	},
+	scalar => sub {
+		return $_[0]; # Nothing happens to scalars
+	}
+);
+
+# Translate our input (presumably text) into a number
+sub number_form {
+	my $self = shift;
+
+	return err("Not enough arguments to number_form") if (@_ < 2);
+	my ($feature, $value) = @_;
+	
+	my $ref = $self->feature($feature) or return;
+
+	# undef is always valid
+	# '*' is always a synonym for undef
+	return undef if (not defined($value));
+	return undef if ($value eq '*');
+
+	# Otherwise, pass processing to the appropriate coderef
+	return $num_form{$ref->{type}}->($value);
+}
+
+# These coderefs take numeric data and return their text equivs (inverse of
+# %num_form)
+my %text_form = (
+	privative => sub {
+		return '';
+	},
+	binary => sub {
+		return '+' if shift;
+		return '-';
+	},
+	scalar => sub {
+		return shift;
+	},
+);
+
+sub text_form {
+	my $self = shift;
+
+	return err("Not enough arguments to text_form") if (@_ < 2);
+	my ($feature, $value) = @_;
+	
+	my $ref = $self->feature($feature) or return;
+
+	# first mash through number_form
+	$value = $self->number_form($feature, $value);
+
+	# '*' is always a synonym for undef
+	return '*' if (not defined($value));
+
+	return $text_form{$ref->{type}}->($value);
+}
+
+1;
+
+=head1 METHODS
+
+=head2 new
+
+    my $features = Lingua::Phonology::Features->new();
+
+This method creates and returns a new Features object. It takes no arguments.
+
+=head2 add_feature
+
+Adds a new feature to the current list of features. Accepts a list of
+arguments of the form "feature_name => { ... }", where the value assigned
+to each feature name must be a hash reference with one or more of the
+following keys:
+
+=over 4
+
+=item * type
+
+The type must be one of 'privative', 'binary', 'scalar', or 'node'.
+The feature created is of the type specified. This key must be defined for all
+features. As of version 0.3, the 'node' type is deprecated, and is considered
+synonymous with 'privative'.
+
+=item * child
+
+The value for this key is a reference to an array of feature names.
+The features named will be assigned as the children of the feature being
+defined. Note that any type of feature may have children, and children may be
+of any type. (This is new in version 0.3.)
+
+=item * parent
+
+The inverse of C<child>. The value for this key must be a 
+reference to an array of feature names that are assigned as the parents
+of the feature being added.
+
+=back
+
+Note that the features named in C<parent> or C<child> must already be
+defined when the new feature is added. Thus, trying to add parents and
+children as part of the same call to C<add_feature()> will almost certainly
+result in errors.
+
+This method return true on success and false if any error occurred.
+
+Example:
+
+	$features->add_feature(
+        anterior => { type => 'binary' },
+        distributed => { type => 'binary' }
+    );
+	$features->add_feature( 
+        Coronal => { type => 'privative', child => ['anterior', 'distributed']}
+    );
+
+Note that if you attempt to add a feature that already exists, the preexisting
+feature will be dropped before the new feature is added.
+
+B<WARNING>: The features C<SYLL, Rime, onset, nucleus, coda, SON> are used by
+Lingua::Phonology::Syllable. They may be defined as part of a user feature set
+if you insist, but their original definitions may be overwritten, since
+Lingua::Phonology::Syllable will forcibly redefine those features when it is
+used. You have been warned.
+
+=head2 feature
+
+    my $feature = $features->feature('name');
+
+Given the name of a feature, returns a hash reference showing the current
+settings for that feature. The hash reference will at least contain the key
+C<type>, naming the feature type, and may contain the keys C<child> and/or
+C<parent> if the feature has some children or parents. If you ask for a feature
+that doesn't exist, this method will return undef and emit a warning.
+
+=head2 feature_exists 
+
+    my $bool = $features->feature_exists('name');
+
+Given the name of the feature, returns a simple truth value indicating whether
+or not any such feature with that name currently exists. Unlike C<feature()>,
+this method never gives an error, and does not return the feature reference on
+success. This can be used by programs that want to quickly check for the
+existence of a feature without printing warnings.
+
+=head2 all_features
+
+    my %features = $features->all_features();
+
+Takes no arguments. Returns a hash with feature names as its keys, and the
+parameters for those features as its values. The values will be hash references
+the same as those returned from C<feature()>;
+
+=head2 drop_feature
+
+    $features->drop_feature('name');
+    $features->drop_feature(@names);
+
+Given one or more feature names, deletes the given feature(s) from the current
+list of features. Note that deleting a feature does not cause its children to
+be deleted--it just causes them to revert to being undominated. This method
+returns true on success, otherwise false with an error.
+
+=head2 change_feature
+
+This method works identically to add_feature(), but it first checks to see that
+the feature being changed already exists. If it doesn't, it will give an error.
+If there are no errors, the method returns true.
+
+The C<add_feature()> method can also be used to change existing features. Using
+C<change_feature()>, however, allows you to modify an existing feature without
+losing existing settings for that feature. For example, consider the following:
+
+    $features->add_feature(foo => { type => 'privative', child => ['bar', 'baz'] });
+    $features->change_feature(foo => { type => 'scalar' });
+    # foo is still the parent of bar and baz
+
+If C<add_feature()> had been used in place of C<change_feature()>, C<foo> would
+not be the parent of anything, because the original settings for its children
+would have been lost.
+
+=head2 children
+
+    my @children = $features->children('name');
+
+Takes one argument, the name of a feature. Returns a list of all of the
+features that are children of the feature given.
+
+=head2 add_child
+
+    $features->add_child('parent', 'child');
+    $features->add_child('parent', @children);
+
+Takes two or more arguments. The first argument to this method should be the
+name of a feature.  The remaining arguments are the names of features to be
+assigned as children to the first feature. If all children are added without
+errors, this function returns true, otherwise false with a warning.
+
+=head2 drop_child
+
+    $features->drop_child('parent', 'child');
+    $features->drop_child('parent', @children);
+
+Like add_child, the first argument to this function should be the name of a
+feature, and the remaining arguments are the names of children of that feature.
+The child features so named will be deleted from the list of children for that
+node. This function returns true on success, false w/ a warning on any error.
+
+=head2 parents
+
+    my @parents = $features->parents('name');
+
+Takes one argument, the name of a feature. Returns a list of the current
+parent features of that feature.
+
+=head2 add_parent
+
+    $features->add_parent('child', 'parent');
+    $features->add_parent('child', @parents);
+
+Takes two or more arguments. The first argument is the name of a feature, and
+the remaining arguments are the names of features that should be parents of
+that feature. Returns true if all of the attempted operations succeeded,
+otherwise returns false. 
+
+=head2 drop_parent
+
+    $features->drop_parent('child', 'parent');
+    $features->drop_parent('child', @parents);
+
+Takes two or more arguments. The first is a feature name, and the remaining
+arguments are the names of features that are currently parents of that feature.
+Those features will cease to be parents of the first feature. Returns true on
+success, false on error.
+
 =head2 type
+
+    # Get a feature type
+    $features->type('name');
+    # Set a feature's type to 'binary', for example
+    $features->type('name', 'binary');
 
 Takes one or two arguments. The first argument must be the name of a 
 feature. If there is only one argument, the type for that feature is
 return. If there are two arguments, the type is set to the second 
 argument and returned.
 
-=cut
+=head2 loadfile
 
-sub type {
-	my $self = shift;
-	my $feature = shift;
-	my $type = shift;
-	my $featureref = $self->feature($feature);
+    # Load defaults
+    $features->loadfile();
+    
+    # Load from a file
+    $features->loadfile('phono.xml');
 
-	# Check that this is a real feature
-	return undef unless $featureref;
+Takes one argument, the path and name of a file. Reads the lines of the file
+and adds all of the features defined therein. The file should be an XML file
+following the format described in L<Lingua::Phonology::FileFormatPOD>. Consult
+that module if you need to write an appropriate file by hand.
 
-	# With two arguments, set the type
-	if ($type) {
-		# Check for valid types
-		return err("Invalid type $type") if (not $valid{$type});
+You can also call this method with no arguments, in which case the default
+feature set is loaded. The default set is described in L<"THE DEFAULT FEATURE
+SET">.
 
-		# Otherwise:
-		$featureref->{type} = $type;
-	} # end if
-	
-	# Return the current type
-	return $featureref->{type};
-} #end sub
+If this method is unable to parse its input as an XML file, it will then pass
+the file off to C<old_loadfile()>, where it will attempt to parse the the file
+according to the old, deprecated file format. If you have an existing script
+that loads a file in the old file format with C<loadfile()>, there's nothing
+that needs to be done immediately since the file will still be parsed
+correctly. However, you will get warnings telling you that the format you're
+using is deprecated.
+
+=head2 old_loadfile
+
+    $features->old_loadfile('filename');
+
+Loads a file in the old (pre-version 0.2) and currently deprecated file format.
+This format is described below.
+
+Feature definition lines should be in this format:
+
+	feature_name   [1 or more tabs]   type   [1 or more tabs]   children (separated by spaces)
+
+You can order your features any way you want in the file. The method will
+take care of ensuring that parents are defined before their children are
+added and make sure no conflicts result.
+
+Lines beginning with a '#' are assumed to be comments and are skipped.
+
+This method does NOT load the default features any more. Only C<loadfile()>
+does that.
+
+=head2 graph
+
+    my $g = $features->graph();
+
+Takes no arguments. Returns an object in the Graph class indicating the
+structure of the current Lingua::Phonology::Features object. You may use this
+graph for printing or other analysis, if you'd like.
+
+You must have the Graph module installed for this function to work. If you do
+not have Graph installed, you will get an error.
 
 =head2 number_form
 
+    my $num = $features->number_form('name', $text);
+
 Takes two arguments. The first argument is the name of a feature, and the
-second is a value to be converted into the appropriate numeric format
-for that feature. The conversion from input value to numeric value depends
-on what type of feature the feature given in the first argument is. A few
-general text conventions are recognized to make text parsing easier and
-to ensure that number_form and L<"text_form"> can be used as inverses of
-each other. The conversions are as follows:
+second is a value to be converted into the appropriate numeric format for that
+feature. This function is provided for convenience, to allow Lingua::Phonology
+to convert between common textual linguistic notation and its internal numeric
+representation.
+
+The conversion from input value to numeric value depends on what type of
+feature the feature given in the first argument is. A few general text
+conventions are recognized to make text parsing easier and to ensure that
+number_form and L<"text_form"> can be used as inverses of each other. The
+conversions are as follows:
 
 =over 4
 
-=item *
+=item * privatives
 
 The string '*' is recognized as a synonym for C<undef> in all circumstances.
 It always returns C<undef>.
 
 =item *
 
-B<privative> features return 1 if given any true true value, else C<undef>.
+B<privative> features return 1 if given any true true value (other than '*'),
+otherwise C<undef>.
 
 =item *
 
@@ -577,7 +784,7 @@ defined false value, and otherwise C<undef>. The string '+' is a synonym for
 	print $features->number_form('binary_feature', 0); # prints 0
 	print $features->number_form('binary_feature', '-'); # prints 0
 
-However, if the feature given is a privative feature, the first returns
+Note, however, if the feature given is a privative feature, the first returns
 C<undef> and the second returns 1.
 
 =item *
@@ -587,62 +794,12 @@ that value is '*', which is translated to C<undef>).
 
 =item *
 
-B<node> features do not have values of their own, but should be hash 
-references containing the values for their children. Therefore, nodes
-return C<undef> for anything other than a hash ref, and return hash refs
-unchanged.
-
 =back
 
-=cut
-
-# The following coderefs exist in a hash for each feature type defined
-our %num_form = (
-	privative => sub {
-		return 1 if $_[0];
-		return undef;
-	},
-	binary =>sub {
-		my $value = shift;
-		# Text values
-		return 0 if ($value eq '-');
-		return 1 if ($value eq '+');
-		# If not given a text value
-		return 1 if ($value);
-		return 0;
-	},
-	scalar => sub {
-		return $_[0]; # Nothing happens to scalars
-	},
-	node => sub {
-		return undef if ref($_[0]) ne 'HASH'; # Nodes should be hashrefs
-		return $_[0];
-	}
-);
-
-sub number_form {
-	my $self = shift;
-
-	# Check number of arguments
-	return err("Not enough arguments to number_form") if ($#_ < 1);
-
-	# Otherwise, take your args
-	my $feature = shift;
-	my $value = shift;
-	
-	# Return bad features
-	my $ref = $self->feature($feature) or return undef;
-
-	# undef is always valid
-	# '*' is always a synonym for undef
-	return undef if (not defined($value));
-	return undef if ($value eq '*');
-
-	# Otherwise, pass processing to the appropriate coderef
-	return &{$num_form{$ref->{type}}}($value);
-} # end number_form 
 
 =head2 text_form
+
+    my $text = $features->text_form('name', $number);
 
 This function is the inverse of number_form. It takes two arguments, a 
 feature name and a numeric value, and returns a text equivalent for the
@@ -657,7 +814,8 @@ Any undefined value or the string '*' returns '*'.
 
 =item *
 
-B<privative> features return '*' if undef or logically false, otherwise '' (an empty string).
+B<privative> features return '*' for undef or logically false values, otherwise
+'' (an empty string).
 
 =item *
 
@@ -666,63 +824,12 @@ undefined.
 
 =item *
 
-B<scalar> features return their values unchanged, except for if they're
-undefined, in which case they return '*'.
+B<scalar> features return their values unchanged, except if they're undefined,
+in which case they return '*'.
 
 =item *
 
-B<node> features behave the same as privative features in this function.
-
 =back
-
-=cut
-
-# Code references
-
-our %text_form = (
-	privative => sub {
-		return '';
-	},
-	binary => sub {
-		return '+' if shift;
-		return '-';
-	},
-	scalar => sub {
-		return shift;
-	},
-	node => sub {
-		return '';
-	}
-);
-
-sub text_form {
-	my $self = shift;
-
-	# Check number of arguments
-	return err("Not enough arguments to text_form") if ($#_ < 1);
-
-	# Otherwise, take your args
-	my $feature = shift;
-	my $value = shift;
-	
-	# Return bad features
-	my $ref = $self->feature($feature) or return undef;
-
-	# first mash through number_form
-	$value = $self->number_form($feature, $value);
-	# '*' is always a synonym for undef
-	return '*' if (not defined($value));
-
-	return &{$text_form{$ref->{type}}}($value);
-} # end text_form
-
-# A very short error writer
-sub err {
-	carp shift if warnings::enabled();
-	return undef;
-} # end err
-
-1;
 
 =head1 THE DEFAULT FEATURE SET
 
@@ -736,57 +843,153 @@ modifications. This set gratuitously mixes privative, binary, and scalar
 features, and may or may not be actually useful to you.
 
 Within this feature set, we use the convention of putting top-level
-(undominated) nodes in ALL CAPS, putting intermediate nodes in Initial
-Caps, and putting terminal features in lowercase. The feature tree created
-is:
+(undominated) nodes in ALL CAPS, putting intermediate nodes in Initial Caps,
+and putting terminal features in lowercase. The following shows the feature
+tree created, with the types of each feature in parenthesis:
 
 	# True features
-	ROOT
+	ROOT (privative)
 	 |
-	 +-sonorant privative
-	 +-approximant privative
-	 +-vocoid privative
-	 +-nasal privative
-	 +-lateral privative
-	 +-continuant binary
+	 +-sonorant (privative)
+	 +-approximant (privative)
+	 +-vocoid (privative)
+	 +-nasal (privative)
+	 +-lateral (privative)
+	 +-continuant (binary)
 	 +-Laryngeal
 	 |  |
-	 |  +-spread privative
-	 |  +-constricted privative
-	 |  +-voice privative
-	 |  +-ATR binary
+	 |  +-spread (privative)
+	 |  +-constricted (privative)
+	 |  +-voice (privative)
+	 |  +-ATR (binary)
 	 |
 	 +-Place
 	    |
-	    +-pharyngeal privative
+	    +-pharyngeal (privative)
 		+-Oral
 		   |
-		   +-labial privative
+		   +-labial (privative)
 		   +-Lingual
 		   |  |
-		   |  +-dorsal privative
+		   |  +-dorsal (privative)
 		   |  +-Coronal
 		   |     |
-		   |     +-anterior binary
-		   |     +-distributed binary
+		   |     +-anterior (binary)
+		   |     +-distributed (binary)
 		   |
 		   +-Vocalic
 		      |
-		      +-aperture scalar
-			  +-tense privative
+		      +-aperture (scalar)
+			  +-tense (privative)
 			  +-Vplace
 			     |
 			     +-labial (same as above)
 				 +-Lingual (same as above)
 	
 	# Features dealing with syllable structure
-	# These are capitalized as if they were in a heirarchy (for
-	# readability), though properly they don't dominate each other
-	SYLLABLE privative
-	onset privative
-	Rime privative
-	nucleus privative
-	coda privative
+	SYLL (privative)
+     |
+     +-onset (privative)
+     +-Rime (privative)
+        |
+        +-nucleus (privative)
+        +-coda (privative)
+    SON (scalar)
+
+This feature set is created from the following XML file, which can be treated
+as an example for creating your own feature sets.
+
+    <phonology>
+      <features>
+
+        <!-- True Features -->
+
+        <feature name="ROOT" type="privative">
+          <child name="sonorant" />
+          <child name="approximant" />
+          <child name="vocoid" />
+          <child name="nasal" />
+          <child name="lateral" />
+          <child name="continuant" />
+          <child name="Laryngeal" />
+          <child name="Place" />
+        </feature>
+        <feature name="sonorant" type="privative" />
+        <feature name="approximant" type="privative" />
+        <feature name="vocoid" type="privative" />
+        <feature name="nasal" type="privative" />
+        <feature name="lateral" type="privative" />
+        <feature name="continuant" type="binary" />
+
+        <feature name="Laryngeal" type="privative">
+          <child name="spread" />
+          <child name="constricted" />
+          <child name="voice" />
+          <child name="ATR" />
+        </feature>
+        <feature name="spread" type="privative" />
+        <feature name="constricted" type="privative" />
+        <feature name="voice" type="privative" />
+        <feature name="ATR" type="binary" />
+
+        <feature name="Place" type="privative">
+          <child name="pharyngeal" />
+          <child name="Oral" />
+        </feature>
+        <feature name="pharyngeal" type="privative" />
+
+        <feature name="Oral" type="privative">
+          <child name="labial" />
+          <child name="Lingual" />
+          <child name="Vocalic" />
+        </feature>
+        <feature name="labial" type="privative" />
+
+        <feature name="Lingual" type="privative">
+          <child name="Coronal" />
+          <child name="dorsal" />
+        </feature>
+        <feature name="dorsal" type="privative" />
+
+        <feature name="Coronal" type="privative">
+          <child name="anterior" />
+          <child name="distributed" />
+        </feature>
+        <feature name="anterior" type="binary" />
+        <feature name="distributed" type="binary" />
+
+        <feature name="Vocalic" type="privative">
+          <child name="Vplace" />
+          <child name="aperture" />
+          <child name="tense" />
+        </feature>
+        <feature name="aperture" type="scalar" />
+        <feature name="tense" type="binary" />
+
+        <feature name="Vplace" type="privative">
+          <child name="labial" />
+          <child name="Lingual" />
+        </feature>
+
+        <!-- Syllabification Features -->
+
+        <feature name="SYLL" type="scalar">
+          <child name="onset" />
+          <child name="Rime" />
+        </feature>
+
+        <feature name="onset" type="privative" />
+        <feature name="Rime" type="privative">
+          <child name="nucleus" />
+          <child name="coda" />
+        </feature>
+        <feature name="nucleus" type="privative" />
+        <feature name="coda" type="privative" />
+
+        <feature name="SON" type="scalar" />
+
+      </features>
+    </phonology>
 
 =head1 TO DO
 
@@ -797,7 +1000,9 @@ their minds about how things are supposed to go together.
 
 =head1 SEE ALSO
 
-Lingua::Phonology::Segment, Lingua::Phonology::Rules
+L<Lingua::Phonology::Segment>
+
+L<Lingua::Phonology::Rules>
 
 =head1 REFERENCES
 
@@ -810,7 +1015,7 @@ and also describes ways to write rules in a feature-geometric system.
 
 =head1 AUTHOR
 
-Jesse S. Bangs <F<jaspax@u.washington.edu>>.
+Jesse S. Bangs <F<jaspax@cpan.org>>
 
 =head1 LICENSE
 
@@ -821,46 +1026,94 @@ same terms as Perl itself.
 
 __DATA__
 
-# Definition of true features, concerned with articulation of segments
-ROOT		node		sonorant approximant vocoid nasal lateral continuant Laryngeal Place
-sonorant	privative
-approximant	privative
-vocoid		privative
-nasal		privative
-lateral		privative
-continuant	binary
+<phonology>
+  <features>
 
-Laryngeal	node		spread constricted voice ATR
-spread		privative
-constricted	privative
-voice		privative
-ATR			binary
+	<!-- True Features -->
 
-Place		node		pharyngeal Oral
-pharyngeal	privative
+    <feature name="ROOT" type="privative">
+      <child name="sonorant" />
+      <child name="approximant" />
+      <child name="vocoid" />
+      <child name="nasal" />
+      <child name="lateral" />
+      <child name="continuant" />
+      <child name="Laryngeal" />
+      <child name="Place" />
+    </feature>
+    <feature name="sonorant" type="privative" />
+    <feature name="approximant" type="privative" />
+    <feature name="vocoid" type="privative" />
+    <feature name="nasal" type="privative" />
+    <feature name="lateral" type="privative" />
+    <feature name="continuant" type="binary" />
 
-Oral		node		labial Lingual Vocalic
-labial		privative
+    <feature name="Laryngeal" type="privative">
+      <child name="spread" />
+      <child name="constricted" />
+      <child name="voice" />
+      <child name="ATR" />
+    </feature>
+    <feature name="spread" type="privative" />
+    <feature name="constricted" type="privative" />
+    <feature name="voice" type="privative" />
+    <feature name="ATR" type="binary" />
 
-Lingual		node		Coronal dorsal
-dorsal		privative
+    <feature name="Place" type="privative">
+      <child name="pharyngeal" />
+      <child name="Oral" />
+    </feature>
+    <feature name="pharyngeal" type="privative" />
 
-Coronal		node		anterior distributed
-anterior	binary
-distributed	binary
+    <feature name="Oral" type="privative">
+      <child name="labial" />
+      <child name="Lingual" />
+      <child name="Vocalic" />
+    </feature>
+    <feature name="labial" type="privative" />
 
-Vocalic		node		Vplace aperture tense
-aperture	scalar
-tense		binary
-Vplace		node		labial Lingual
+    <feature name="Lingual" type="privative">
+      <child name="Coronal" />
+      <child name="dorsal" />
+    </feature>
+    <feature name="dorsal" type="privative" />
 
-# Definition of syllable-related features, used for parsing syllables
-# These aren't truly heirarchical, to allow for proper domaining
-SON			scalar
-SYLL		scalar
-Rime		privative
-onset		privative
-nucleus		privative
-coda		privative
+    <feature name="Coronal" type="privative">
+      <child name="anterior" />
+	  <child name="distributed" />
+    </feature>
+    <feature name="anterior" type="binary" />
+    <feature name="distributed" type="binary" />
 
-__END__
+    <feature name="Vocalic" type="privative">
+      <child name="Vplace" />
+      <child name="aperture" />
+      <child name="tense" />
+    </feature>
+    <feature name="aperture" type="scalar" />
+    <feature name="tense" type="binary" />
+
+    <feature name="Vplace" type="privative">
+      <child name="labial" />
+      <child name="Lingual" />
+    </feature>
+
+	<!-- Syllabification Features -->
+
+    <feature name="SYLL" type="scalar">
+	  <child name="onset" />
+	  <child name="Rime" />
+	</feature>
+
+    <feature name="onset" type="privative" />
+    <feature name="Rime" type="privative">
+	  <child name="nucleus" />
+	  <child name="coda" />
+	</feature>
+    <feature name="nucleus" type="privative" />
+    <feature name="coda" type="privative" />
+
+    <feature name="SON" type="scalar" />
+
+  </features>
+</phonology>

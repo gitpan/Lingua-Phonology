@@ -1,0 +1,37 @@
+<phonology>
+	<rules>
+		<rule name="SimpleSpell">
+			/s/ => /S/ : _/i/
+		</rule>
+		<rule name="SimpleFeatural">
+			[labial vocoid] => [*labial] / [labial]_
+		</rule>
+		<rule name="QuoteValue">
+			[aperture="\"''"] => [aperture="''`%^\$&gt;&lt;\" foo"]
+		</rule>
+		<rule name="FeatureTypes">
+			[-anterior aperture='2' vocoid] => [+anterior aperture=3  *vocoid]
+		</rule>
+		<rule name="Delete">
+			[coda] => 0
+		</rule>
+		<rule name="Insert">
+			0 => /i/ : /s/_/k/
+		</rule>
+		<rule name="SegmentSet">
+			(/d/|/g/|[labial]) => /h/ : _[*vocoid]
+		</rule>
+		<rule name="ConditionSet">
+			[Coronal] => /s/ : ( /s/_ | _$ )
+		</rule>
+		<rule name="MultipleDelete">
+			/s//k/ => /S/0 : $_
+		</rule>
+        <rule name="MultipleChange">
+            [labial][vocoid] => [*voice][labial] : _[dorsal]
+        </rule>
+        <rule name="MultipleInsert">
+            [Coronal] 0 [Coronal] => [] /i/ [] : _[*vocoid]
+        </rule>
+	</rules>
+</phonology>

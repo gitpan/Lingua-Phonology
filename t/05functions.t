@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 use Lingua::Phonology;
-use Test::More tests=>37;
+use Test::More tests=>36;
 
 # use
 eval {
@@ -17,12 +17,6 @@ no warnings 'Lingua::Phonology::Functions';
 # basic features and symbol sets
 my $phono = new Lingua::Phonology;
 $phono->features->loadfile;
-# we'll add these features to similate being in Rules.pm, even though we're not
-$phono->features->add_feature( 
-	BOUNDARY => { type => 'privative' },
-	INSERT_RIGHT => { type => 'scalar' },
-	INSERT_LEFT => { type => 'scalar' }
-);
 $phono->symbols->loadfile;
 # drop these symbols to avoid having to syllabify
 $phono->symbols->drop_symbol('j'); 
@@ -30,63 +24,99 @@ $phono->symbols->drop_symbol('w');
 
 # bad segments to use in failure testing
 my $notseg = {};
-my $bound = $phono->segment;
-$bound->BOUNDARY(1);
+my $bound = Lingua::Phonology::Segment::Boundary->new();
 
-my @word = $phono->symbols->segment(split(//, 'bkinimo'));
+my @word = $phono->symbols->segment(split //, 'bkinimo');
 
 # assimilate
-ok(assimilate('voice', $word[0], $word[1]), 'test assimilate()');
-is($word[1]->value_ref('voice'), $word[0]->value_ref('voice'), 'test results of assimilate()');
+ok assimilate('voice', $word[0], $word[1]), 'test assimilate()';
+is $word[1]->value_ref('voice'), $word[0]->value_ref('voice'), 'test results of assimilate()';
 ok((not assimilate('voice', $word[0], $notseg)), 'test failure of assimilate() on non-segment');
-ok((not assimilate('voice', $word[0], $bound)), 'test failure of assimilate() on boundary');
+
+# flat assimilate
+$word[3]->ROOT(1);
+ok flat_assimilate('ROOT', $word[3], $word[4]), 'test flat_assimilate';
+is $word[3]->value_ref('ROOT'), $word[4]->value_ref('ROOT'), 'test result of flat_assimilate';
+isnt $word[3]->nasal, $word[4]->nasal, 'test child feature is unchanged';
+ok((not flat_assimilate('ROOT', $word[4], $notseg)), 'test failure of flat_assimilate() on non-segment');
 
 # copy
-ok(copy('aperture', $word[4], $word[6]), 'test copy()');
-is($word[4]->aperture, $word[6]->aperture, 'test results of copy()');
+ok copy('aperture', $word[6], $word[4]), 'test copy()';
+is $word[4]->aperture, $word[6]->aperture, 'test results of copy()';
 ok((not copy('aperture', $word[1], $notseg)), 'test failure of copy() on non-segment');
-ok((not copy('aperture', $word[1], $bound)), 'test failure of copy() on boundary');
+
+# flat copy
+ok flat_copy('ROOT', $word[3], $word[2]), 'test flat_copy';
+is $word[3]->value('ROOT'), $word[2]->value('ROOT'), 'test result of flat_copy';
+isnt $word[3]->nasal, $word[2]->nasal, 'test child feature is unchanged';
+ok((not flat_copy('ROOT', $word[2], $notseg)), 'test failure of flat_copy() on non-segment');
 
 # dissimilate
-ok(dissimilate('nasal', $word[3], $word[5]), 'test dissimilate()');
+ok((not dissimilate('nasal', $word[3], $word[5])), 'test dissimilate()');
 ok((not $word[5]->nasal), 'test results of dissimilate()');
 ok((not dissimilate('nasal', $word[3], $notseg)), 'test failure of dissimilate() on non-segment');
-ok((not dissimilate('nasal', $word[3], $bound)), 'test failure of dissimilate() on boundary');
 
 # change
 ok(change($word[3], 's'), 'test change()');
 is($word[3]->spell, 's', 'test result of change()');
 ok((not change($notseg, 's')), 'test failure of change() on non-segment');
-ok((not change($bound, 's')), 'test failure of change() on boundary');
 
-# segment metathesize
-ok(metathesize($word[0], $word[1]), 'test metathesize()');
-is(($word[0]->spell . $word[1]->spell), 'gb', 'test results of metathesize()');
-ok((not metathesize($word[0], $notseg)), 'test failure of metathesize() on non-segment');
-ok((not metathesize($word[0], $bound)), 'test failure of metathesize() on boundary');
+# Make a real rules object for the following tests, which don't make sense
+# outside of Rules
 
-# feature metathesize
-ok(metathesize_feature('labial', $word[4], $word[6]), 'test metathesize_feature()');
-ok(($word[4]->labial) && (not $word[6]->labial), 'test results of metathesize_feature()');
-ok((not metathesize_feature('labial', $word[4], $notseg)), 'test failure of metathesize_feature() on non-segment');
-ok((not metathesize_feature('labial', $word[4], $bound)), 'test failure of metathesize_feature() on boundary');
+my $rules = $phono->rules;
+
+{
+    $rules->add_rule(
+        meta => { 
+            do => sub { ok metathesize($_[0], $_[1]), 'test metathesize()' }, 
+            where => sub { $_[-1]->BOUNDARY }
+        }
+    );
+    
+    # segment metathesize
+    $rules->meta(\@word);
+    is $word[0]->spell . $word[1]->spell, 'gb', 'test results of metathesize()';
+    ok((not metathesize($word[0], $notseg)), 'test failure of metathesize() on non-segment');
+    $rules->drop_rule('meta');
+}
+
+{
+    $rules->add_rule(
+        meta_feature => {
+            where => sub { $_[-1]->BOUNDARY },
+            do => sub { ok metathesize_feature('labial', $_[1], $_[0]), 'test metathesize_feature()'; }
+        }
+    );
+
+    $rules->meta_feature(\@word);
+    ok(($word[0]->labial && not $word[1]->labial), 'test results of metathesize_feature()');
+    ok((not metathesize_feature('labial', $word[4], $notseg)), 'test failure of metathesize_feature() on non-segment');
+}
 
 # delete segments
-ok(delete_seg($word[6]), 'test delete_seg()');
-my %vals = $word[6]->all_values;
-is(keys %vals, 0, 'test result of delete_seg()');
-ok((not delete_seg($notseg)), 'test failure of delete_seg() on non-segment');
-ok((not delete_seg($bound)), 'test failure of delete_seg() on boundary');
+{
+    ok(delete_seg($word[6]), 'test delete_seg()');
+    my %vals = $word[6]->all_values;
+    is(keys %vals, 0, 'test result of delete_seg()');
+    ok((not delete_seg($notseg)), 'test failure of delete_seg() on non-segment');
+}
 
 # insert before
-ok(insert_before($word[1], $phono->symbols->segment('@')), 'test insert_before()');
-is($word[1]->INSERT_LEFT->spell, '@', 'test result of insert_before()');
-ok((not insert_before($notseg, $phono->symbols->segment('@'))), 'test failure of insert_before() on non-segment');
-ok((not insert_before($bound, $phono->symbols->segment('@'))), 'test failure of insert_before() on boundary');
+{
+    my $tester = Lingua::Phonology::Segment::Rules->new($word[1]);
+
+    ok insert_before($tester, $phono->symbols->segment('@')), 'test insert_before()';
+    is $tester->INSERT_LEFT->spell, '@', 'test result of insert_before()';
+    ok((not insert_before($notseg, $phono->symbols->segment('@'))), 'test failure of insert_before() on non-segment');
+}
 
 # insert after
-ok(insert_after($word[5], $word[4]->duplicate), 'test insert_after()');
-is($phono->symbols->spell($word[5]->INSERT_RIGHT), $word[4]->spell, 'test result of insert_after()');
-ok((not insert_after($notseg, $word[4]->duplicate)), 'test failure of insert_after() on non-segment');
-ok((not insert_after($bound, $word[4]->duplicate)), 'test failure of insert_after() on boundary');
+{
+    my $tester = Lingua::Phonology::Segment::Rules->new($word[1]);
+
+    ok insert_after($tester, $word[4]->duplicate), 'test insert_after()';
+    is $tester->INSERT_RIGHT->spell, $word[4]->spell, 'test result of insert_after()';
+    ok((not insert_after($notseg, $word[4]->duplicate)), 'test failure of insert_after() on non-segment');
+}
 

@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use Test::More tests=>108, todo=>[108];
+use Test::More tests => 98;
 
 ##############################
 # BASIC TESTS                #
@@ -31,19 +31,22 @@ for ('node','privative','binary','scalar') {
 	ok($feat->add_feature("test_$_"=>{type=>$_}), "add simple $_");
 
 	# test the return of feature()
-	is($feat->feature("test_$_")->{type}, $_, "test feature() for $_");
+	is($feat->feature("test_$_")->{type}, $_, "test feature() for $_") unless $_ eq 'node';
 
-	# test return of feature_exists()
+	# test return of feature_exists() (skip nodes, whose type gets changed)
 	ok $feat->feature_exists("test_$_"), "test feature_exists() for $_";
 	
-	# test type()
-	is($feat->type("test_$_"), $_, "test type() for $_");
+	# test type(), except for nodes
+	is($feat->type("test_$_"), $_, "test type() for $_") unless $_ eq 'node';
 
 	# test change_feature()
 	ok($feat->change_feature("test_$_"=>{type=>$_}), "change_feature() for $_");
 
 	# test drop_feature
 	ok($feat->drop_feature("test_$_"), "drop_feature() for $_");
+
+    # make sure the feature was dropped
+    ok((not $feat->feature_exists("test_$_")), "feature $_ dropped");
 } # end if
 
 # test failure cases for preceding functions
@@ -65,8 +68,8 @@ ok((not $feat->change_feature("test_nonesuch"=>{type=>'nonesuch'})), "test failu
 #############################
 # PARENTING                 #
 #############################
-# preparation--add the parent features
-$feat->add_feature(parent1=>{type=>'node'}, parent2=>{type=>'node'});
+# preparation--add the parent features (in different types)
+$feat->add_feature(parent1=>{type=>'privative'}, parent2=>{type=>'binary'});
 
 # add a parent via add_feature
 ok($feat->add_feature(child1=>{type=>'privative', parent=>['parent1']}), 'add parent via add_feature()');
@@ -95,9 +98,6 @@ ok((not $feat->add_parent('child1', 'nonesuch')), 'failure on adding nonexistent
 # parent of a nonexistent feature
 ok((not $feat->add_parent('nonesuch', 'parent1')), 'failure on adding parent to a nonexistent feature');
 
-# parent a feature that is not a node
-ok((not $feat->add_parent('parent2', 'child1')), 'failure on adding a parent that is not a node');
-
 # get parents from nonexistent feature
 ok((not $feat->parents('nonesuch')), 'failure on parents of nonexistent feature');
 
@@ -109,7 +109,7 @@ ok((not $feat->drop_parent('nonesuch', 'parent1')), 'failure on drop_parent from
 ##############################
 # use the features already prepared
 # add a child via change_feature (already tested)
-ok($feat->change_feature(parent1=>{type=>'node',child=>['child1']}), 'add child w/ change_feature');
+ok($feat->change_feature(parent1=>{type=>'scalar',child=>['child1']}), 'add child w/ change_feature');
 
 # check via children()
 my ($kid) = $feat->children('parent1');
@@ -135,9 +135,6 @@ ok((not $feat->add_child('parent1', 'nonesuch')), 'failure on adding nonexistent
 # child of a nonexistent feature
 ok((not $feat->add_child('nonesuch', 'child1')), 'failure on adding child to nonexistent feature');
 
-# child of a feature that is not a node
-ok((not $feat->add_child('child1', 'parent2')), 'failure on adding child to feature that is not a node');
-
 # get children from fake feature
 ok((not $feat->children('nonesuch')), 'failure on children from nonexistent feature');
 
@@ -150,26 +147,11 @@ ok((not $feat->drop_child('nonesuch', 'child1')), 'failure on drop_child from no
 # all_features works
 ok((my %features = $feat->all_features), 'all_features()');
 
-# load default features
-ok($feat->loadfile, 'load default features');
-
-# load an actual file
-ok($feat->loadfile('test.features'), 'load an actual file');
-
-# test loads from file
-for ('privative','binary','scalar','node') {
-	is($feat->type($_), $_, "test loaded feature $_");
-	my ($parent) = $feat->parents($_);
-	is($parent, 'node', "test parenting of $_") if ($_ ne 'node');
-}
-
-# test failure to load
-ok((not $feat->loadfile('nosuch.features')), 'failure on loadfile');
-
 #############################
 #	TEXT AND NUMBER FORMS   #
 #############################
 # expected values
+$feat->loadfile('t/test.xml');
 my @vals = (0,  1,  undef, '', '-',  '+',  '*');
 my %expected = (
 	num => {

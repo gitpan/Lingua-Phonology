@@ -22,17 +22,21 @@ contact the author.
 =cut
 
 use strict;
-use warnings::register;
+use warnings;
 use Carp;
-use Lingua::Phonology; # just to get the warning definitions
+use warnings::register;
+use Lingua::Phonology::Common;
 
 require Exporter;
 our @ISA = qw/Exporter/;
 
 our @EXPORT_OK = qw(
 	assimilate
+	flat_assimilate
 	adjoin
+	flat_adjoin
 	copy
+	flat_copy
 	dissimilate
 	change
 	metathesize
@@ -43,8 +47,119 @@ our @EXPORT_OK = qw(
 );
 our %EXPORT_TAGS = (all => \@EXPORT_OK);
 
-our $VERSION = 0.11;
+our $VERSION = 0.21;
 
+sub err ($) { warnings::warnif(shift); return; }
+
+# Join two segments for a feature
+sub assimilate {
+	my ($feature, $seg1, $seg2) = @_;
+	return unless _is_seg $seg1 && _is_seg $seg2;
+	$seg2->delink($feature);
+	$seg2->$feature( $seg1->value_ref($feature) );
+}
+
+# Synonym
+*adjoin = \&assimilate;
+
+# Copy vals but not references
+sub copy {
+	my ($feature, $seg1, $seg2) = @_;
+	return unless _is_seg $seg1 && _is_seg $seg2;
+	$seg2->delink($feature);
+	$seg2->$feature( $seg1->$feature );
+}
+
+# Assimilate only the top value of a feature
+sub flat_assimilate {
+	my ($feature, $seg1, $seg2) = @_;
+	return unless _is_seg $seg1 && _is_seg $seg2;
+	my @rv = $seg1->value_ref($feature);
+	$seg2->value_ref($feature, $rv[0]);
+}
+*flat_adjoin = \&flat_assimilate;
+
+# Same, but copy
+sub flat_copy {
+	my ($feature, $seg1, $seg2) = @_;
+	return unless _is_seg $seg1 && _is_seg $seg2;
+	my @rv = $seg1->$feature;
+	$seg2->$feature($rv[0]);
+}
+		
+# Make two segs disagree
+sub dissimilate {
+	my ($feature, $seg1, $seg2) = @_;
+	return unless _is_seg $seg1 && _is_seg $seg2;
+	$seg1->$feature ? $seg2->$feature(\0) : $seg2->$feature(\1);
+	return $seg2->$feature;
+}
+
+# Change a segment into a symbol
+sub change {
+	my ($seg, $sym) = @_;
+	return unless _is_seg $seg;
+	$seg->clear;
+	my %new_vals = $seg->symbolset->prototype($sym)->all_values;
+	$seg->$_($new_vals{$_}) for (keys %new_vals);
+	return 1;
+}
+
+# Switch the position of two segments
+sub metathesize {
+	my ($seg1, $seg2) = @_;
+    # This will ensure that we get the right kind of segs
+	return unless _is_ruleseg $seg1 && _is_ruleseg $seg2;
+
+    # Decide which direction we're going
+    if ($seg1->_RULE->{direction} eq 'rightward') {
+        $seg1->INSERT_LEFT($seg2->duplicate);
+        $seg2->clear;
+    } 
+    elsif ($seg1->_RULE->{direction} eq 'leftward') {
+        $seg2->INSERT_RIGHT($seg1->duplicate);
+        $seg1->clear;
+    } 
+	return 1;
+}
+
+# Switch the feature of two segments
+sub metathesize_feature {
+	my ($feature, $seg1, $seg2) = @_;
+	return unless _is_seg $seg1 && _is_seg $seg2;
+
+    # Capture existing vals
+	my @temp1 = $seg1->$feature;
+	my @temp2 = $seg2->$feature;
+    $seg1->delink($feature);
+    $seg2->delink($feature);
+
+    # Switcheroo
+	$seg1->$feature(@temp2);
+	$seg2->$feature(@temp1);
+}
+
+# Delete a seg
+sub delete_seg {
+	return unless _is_seg $_[0];
+	$_[0]->clear;
+}
+
+# Insert a seg after a seg
+sub insert_after {
+	my ($seg1, $seg2) = @_;
+	return unless _is_ruleseg $seg1 && _is_seg $seg2;
+	$seg1->INSERT_RIGHT($seg2);
+}
+
+# Insert a seg before a seg
+sub insert_before {
+	my ($seg1, $seg2) = @_;
+	return unless _is_ruleseg $seg1 && _is_seg $seg2;
+	$seg1->INSERT_LEFT($seg2);
+}
+
+__END__
 
 =head1 FUNCTIONS
 
@@ -85,21 +200,13 @@ Lingua::Phonology::Segment objects depending on that same Features object.
 
 	assimilate($feature, $segment1, $segment2);
 
-Assimilates $segment2 to $segment1 on $feature. This does a "deep"
-assimilation, copying the reference from $segment1 to $segment2 so that
-future modifications of this feature for either segment will be reflected
-on both segments. If you don't want this, use C<copy()> instead.
+Assimilates $segment2 to $segment1 on $feature. This does a recursive
+assimilation, so that all children of $feature are also assimilated. This also
+does a "deep" assimilation, copying the reference from $segment1 to $segment2
+so that future modifications of this feature for either segment will be
+reflected on both segments.  If you don't want this, use C<copy()> instead.
 
-=cut
-
-sub assimilate {
-	my ($feature, $seg1, $seg2) = @_;
-	return undef unless is_segment($seg1, $seg2);
-	return undef if is_boundary($seg1, $seg2);
-	$seg2->delink($feature);
-	$seg2->$feature( $seg1->value_ref($feature) );
-	return 1; # return true on success
-}
+The new value of the feature is returned.
 
 =head2 adjoin
 
@@ -108,71 +215,53 @@ sub assimilate {
 This function is synonymous with C<assimilate()>. It is provided only to
 aid readability.
 
-=cut
-
-sub adjoin {
-	return assimilate(@_);
-}
-
 =head2 copy
 
 	copy($feature, $segment1, $segment2);
 
-Copies the value of $feature from $segment1 to $segment2. This does a
-"shallow" copy, copying the value but not the underlying reference.
+Copies the value of $feature from $segment1 to $segment2, recursively so that
+all children of $feature are also copied. This does a "shallow" copy, copying
+the value but not the underlying reference, so that $segment1 and $segment2 can
+vary independently after the feature value is copied. Returns the new value of
+the feature.
 
-=cut
+=head2 flat_assimilate
 
-sub copy {
-	my ($feature, $seg1, $seg2) = @_;
-	return undef unless is_segment($seg1, $seg2);
-	return undef if is_boundary($seg1, $seg2);
-	$seg2->delink($feature);
-	$seg2->$feature( $seg1->$feature );
-	return 1;
-}
+	flat_assimilate($feature, $segment1, $segment2);
+
+Assimilates the value of $feature from $segment1 to $segment2 non-recursively.
+This will cause the values for $feature to be references to the same value for
+both segments, but will not affect any of children of $feature for either
+segment.
+
+=head2 flat_adjoin
+
+	flat_adjoin($feature, $segment1, $segment2);
+
+Identical to L<C<flat_assimilate>>. Provided only for readability.
+
+=head2 flat_copy
+
+	flat_copy($feature, $segment1, $segment2);
+
+Copies the value of $feature from $segment1 to $segment2 non-recursively. This
+will cause the numerical value of $feature to be the same for both segments,
+but will not make them have references to the same data, nor will it affect the
+children of $feature.
 
 =head2 dissimilate
 
 	dissimilate($feature, $segment1, $segment2);
 
-Dissimilates $segment2 from $segment1 on $feature. If
-$segment1->value($feature) is true, then $segment2->value($feature) is set
-to false, and vice-versa. The "true" and "false" values tested and returned
-may differ depending on whether $feature is privative, binary, or scalar.
+Dissimilates $segment2 from $segment1 on $feature, or something like it.  If
+$segment1->value($feature) is true, then this attempts to assign 1 to
+$segment2->$feature. If $segment1->value($feature) is false, this attempts to
+assign 0. The actual value that is subsequently returned will depend on the
+type of $feature. The new value of $segment2->$feature will be returned.
 
-If $feature is a node, then if C<< $segment1->value($feature) >> is true, the
-node $feature for $segment2 will be delinked. This will cause all children of
-$feature to become undefined.  If $segment1->value($feature) is false, no
-action is taken, because there is no sensible way to assign a true value to a
-node--nodes only return true if they have defined children, and there is no way
-to know which child of $feature should be defined. Sorry.
-
-If $segment1 and $segment2 currently have a reference to the same feature,
-$segment2 will be assigned a new reference, breaking the connection between
-the two segments.
-
-=cut
-
-sub dissimilate {
-	my ($feature, $seg1, $seg2) = @_;
-	return undef unless is_segment($seg1, $seg2);
-	return undef if is_boundary($seg1, $seg2);
-
-	# For nodes, assign an empty hash for negative assimilation
-	if ($seg1->featureset->type($feature) eq 'node') {
-		$seg2->delink($feature) if ($seg1->$feature);
-		return 1;
-	}
-
-	# For all else, assign values
-	# Start by delinking $seg2, whatever it is (avoids the problems w/ shared refs)
-	$seg2->delink($feature);
-
-	# decide value and assign it
-	$seg1->$feature ? $seg2->$feature(0) : $seg2->$feature(1);
-	return 1;
-}
+If $segment1 and $segment2 currently have a reference to the same value for
+$feature, $segment2 will be assigned a new reference, breaking the connection
+between the two segments.
 
 =head2 change
 
@@ -183,26 +272,16 @@ indicating a symbol in the symbol set associated with $segment1. If
 $segment1 doesn't have a symbol set associated with it, this function will
 fail.
 
-=cut
-
-sub change {
-	my ($seg, $sym) = @_;
-	return undef unless is_segment($seg);
-	return undef if is_boundary($seg);
-	$seg->clear;
-	my %new_vals = $seg->symbolset->prototype($sym)->all_values;
-	$seg->$_($new_vals{$_}) for (keys %new_vals);
-	return 1;
-}
-	
 =head2 metathesize
 
 	metathesize($segment1, $segment2);
 
-This function swaps the order of $segment1 and $segment2. $segment1 MUST be the
-first of the two segments, or else this function may result in a
-non-terminating loop as the same two segments are swapped repeatedly. (The
-exact behavior of this depends on the implementation of
+This function swaps the order of $segment1 and $segment2. Returns true on
+success, false on failure.
+
+$segment1 MUST be the first of the two segments, or else this function may
+result in a non-terminating loop as the same two segments are swapped
+repeatedly. (The exact behavior of this depends on the implementation of
 Lingua::Phonology::Rules, which is not a fixed quantity. But things should be
 okay if you heed this warning.)
 
@@ -218,78 +297,21 @@ C<do> code reference closes, so you can't make changes to the metathesized
 segments immediately after changing them and have the segments be where you
 expect them.
 
-=cut
-
-sub metathesize {
-	my ($seg1, $seg2) = @_;
-	return undef unless is_segment($seg1, $seg2);
-	return undef if is_boundary($seg1, $seg2);
-
-	# Are we in a rule?
-	no warnings 'Lingua::Phonology::Features'; # turn off 'no such feature' warnings
-	unless ($seg1->featureset->feature('_RULE')) {
-		# Swap references
-		$_[0] = $seg2;
-		$_[1] = $seg1;
-		return 1;
-	}
-
-	# If we are in a rule
-	if ($seg1->_RULE) {
-		# Decide which direction we're going
-		if ($seg1->_RULE->{direction} eq 'rightward') {
-			$seg1->INSERT_LEFT($seg2->duplicate);
-			$seg2->clear;
-		} # end if
-		elsif ($seg1->_RULE->{direction} eq 'leftward') {
-			$seg2->INSERT_RIGHT($seg1->duplicate);
-			$seg1->clear;
-		} # end elsif
-	}
-	return 1;
-	
-}
-
 =head2 metathesize_feature
 
 	metathesize_feature($feature, $segment1, $segment2);
 
 This function swaps the value of $feature for $segment1 with the value of
-$feature for $segment2. This is primarily useful if C<$feature = 'ROOT'>,
-because in this case all of the true feature values will be swapped, but
-the syllabification will not be changed. Then again, that might not be
-useful at all.
-
-=cut
-
-sub metathesize_feature {
-	my ($feature, $seg1, $seg2) = @_;
-	return undef unless is_segment($seg1, $seg2);
-	return undef if is_boundary($seg1, $seg2);
-
-	my $temp1 = $seg1->$feature;
-	my $temp2 = $seg2->$feature;
-	$seg1->$feature($temp2);
-	$seg2->$feature($temp1);
-	return 1;
-}
+$feature for $segment2, and returns the new value of $segment2->$feature.
 
 =head2 delete_seg
 
 	delete_seg($segment1);
 
 Deletes $segment1. This is essentially a synonym for calling C<<
-$segment1->clear >>, though it's more readable.
+$segment1->clear >>.
 
-=cut
-
-sub delete_seg {
-	return undef unless is_segment($_[0]);
-	return undef if is_boundary($_[0]);
-	$_[0]->clear;
-}
-
-=head2 insert
+=head2 insert_after
 
 	insert_after($segment1, $segment2);
 
@@ -298,15 +320,6 @@ L<"metathesize">, this function assumes that it is being called as part of
 the C<do> property of a Lingua::Phonology::Rules rule, so any environment
 other than this will probably raise errors.
 
-=cut
-
-sub insert_after {
-	my ($seg1, $seg2) = @_;
-	return undef unless is_segment($seg1, $seg2);
-	return undef if is_boundary($seg1, $seg2);
-	$seg1->INSERT_RIGHT($seg2);
-}
-
 =head2 insert_before
 
 	insert_before($segment1, $segment2);
@@ -314,50 +327,14 @@ sub insert_after {
 This function inserts $segment2 before $segment1, just like insert_after().
 The same warnings that apply to insert_after() apply to this function.
 
-=cut
-
-sub insert_before {
-	my ($seg1, $seg2) = @_;
-	return undef unless is_segment($seg1, $seg2);
-	return undef if is_boundary($seg1, $seg2);
-	$seg1->INSERT_LEFT($seg2);
-}
-
-sub is_segment {
-	for (@_) {
-		if (not (UNIVERSAL::isa($_, 'Lingua::Phonology::Segment') or UNIVERSAL::isa($_, 'Lingua::Phonology::PseudoSegment'))) {	
-			carp "Argument not a segment" if warnings::enabled();
-			return 0;
-		} # end if
-	} # end for
-	return 1;
-} #end is_segment
-
-sub is_boundary {
-	# turn off those pesky warnings
-	no warnings 'Lingua::Phonology::Features';
-
-	# leave if we don't have that feature
-	return 0 unless $_[0]->featureset->feature('BOUNDARY');
-
-	# otherwise:
-	for (@_) {
-		if ($_->BOUNDARY) {
-			carp "Attempted modification of boundary" if (warnings::enabled());
-			return 1;
-		}
-	}
-	return 0;
-} # end is_segment
-
 =head1 SEE ALSO
 
-Lingua::Phonology, Lingua::Phonology::Rules, Lingua::Phonology::Features,
-Lingua::Phonology::Segment
+L<Lingua::Phonology>, L<Lingua::Phonology::Rules>,
+L<Lingua::Phonology::Features>, L<Lingua::Phonology::Segment>
 
 =head1 AUTHOR
 
-Jesse S. Bangs <F<jaspax@u.washington.edu>>.
+Jesse S. Bangs <F<jaspax@cpan.org>>.
 
 =head1 LICENSE
 

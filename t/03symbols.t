@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use Test::More tests=>37;
+use Test::More tests => 33;
 
 BEGIN {
 	use_ok('Lingua::Phonology::Symbols');
@@ -82,16 +82,6 @@ ok((not $sym->change_symbol(fail => $bnew)), 'failure of change_symbol()');
 ok($sym->drop_symbol('b'), 'drop_symbol');
 ok $sym->drop_symbol('*~'), 'drop_symbol on diacritic';
 
-# loadfile (real file)
-ok($sym->loadfile('test.symbols'), 'loadfile() on actual file');
-ok($sym->prototype('b') && $sym->prototype('m') && $sym->prototype('p'), 'test loaded symbols');
-
-# loadfile (defaults)
-ok($sym->loadfile, 'load default symbols');
-
-# bad load file
-ok((not $sym->loadfile('nosuch.symbols')), 'failure of loadfile()');
-
 # auto_reindex
 is $sym->auto_reindex, 1, 'test auto_reindex';
 is $sym->auto_reindex('foo'), 1, 'test auto_reindex';
@@ -110,6 +100,6 @@ is $sym->{AUTOINDEX}, 1, 'result of set_auto_reindex';
 
 # test that auto index off actually does its thing
 $sym->no_auto_reindex;
-$sym->prototype('k'); # trips the REINDEX flag on
+$sym->symbol(b => $b); # trips the REINDEX flag on
 $sym->spell($b); # should leave the REINDEX flag on
 is $sym->{REINDEX}, 1, 'test effect of no_auto_reindex'; # we have to break encapsulation here

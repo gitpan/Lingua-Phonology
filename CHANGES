@@ -1,4 +1,14 @@
 =============================
+Changes from v0.25 to 0.3
+* Added loadfile() methods to all major classes with XML support
+* Added Common.pm
+* Added RuleParser.pm
+* Reworked Segment class heirarchy
+* Modified the Symbols::spell algorithm
+* Expanded test suite
+* Fixed innumerable small bugs
+
+=============================
 Changes from v0.2 to v0.25
 
 This was a bug-fix update from 0.2, but the bug-fix proved to be fairly major,

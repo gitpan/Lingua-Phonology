@@ -34,93 +34,142 @@ to a set of parameters. The parameters used are well-known linguistic
 parameters, so most kinds of syllabification can be handled in just a few
 lines of code by setting the appropriate values.
 
-This module uses a special set of features to indicate syllabification.
-These features are added to the feature set of the input segments (which
-should be a Lingua::Phonology::Features object). The features added are as
-follows:
+This module uses a special set of features to indicate syllabification.  These
+features are added to the feature set of the input segments. The features added
+are arranged in a heirarchy as follows:
 
-	SYLL	scalar     # Non-zero if the segment has been syllabified
-	Rime	privative  # Set if the segment is part of the Rime (i.e. nucleus or coda)
-	onset   privative  # Set if the segment is part of the onset
-	nucleus privative  # Set if the segment is the nucleus
-	coda    privative  # Set if the segment is part of the coda
-	SON     scalar     # An integer indicating the calculated sonority of the segment
+	SYLL	       scalar     Non-zero if the segment has been syllabified
+	 |-onset       privative  True if the segment is part of the onset
+	 |-Rime	       privative  True if the segment is part of the Rime (i.e. nucleus or coda)
+	    |-nucleus  privative  True if the segment is the nucleus
+	    |-coda     privative  True if the segment is part of the coda
+	SON            scalar     An integer indicating the calculated sonority of the segment
 
 The module will set these features so that subsequent processing by
-Lingua::Phonology::Rules will correctly split the word up into domains or
-tiers.
+Lingua::Phonology::Rules will correctly split the word up into domains or tiers
+on these features.
 
 The algorithm and parameters used to syllabify an input word are described
-in the L<"Algorithm"> and L<"Parameters"> sections.
+in the L<"ALGORITHM"> and L<"PARAMETERS"> sections.
 
 =cut
 
 use strict;
+use warnings;
 use warnings::register;
 use Carp;
+use Lingua::Phonology::Common;
 use Lingua::Phonology::Rules;
-use Lingua::Phonology::Functions qw/adjoin/;
+use Lingua::Phonology::Functions qw/adjoin flat_adjoin/;
 
-our $VERSION = 0.25;
+our $VERSION = 0.3;
 
-# Properties to use, in name => default format
+sub err ($) { warnings::warnif(shift); return; }
+
+# Build accessors for our properties. Hashes in name => default format
 our %bool = ( 
+    onset => 1,
     complex_onset => 0,
     coda => 0,
 	complex_coda => 0
 );
+for my $name (keys %bool) {
+    no strict 'refs';
+    *$name = sub {
+        my $self = shift;
+        if (@_) {
+            if ($_[0]) { $self->{ATTR}->{$name} = 1; }
+            else { $self->{ATTR}->{$name} = 0; }
+        }
+        return $self->{ATTR}->{$name};
+    };
+    *{"set_$name"} = sub { (shift)->$name(1) };
+    *{"no_$name"} = sub { (shift)->$name(0) };
+}
+
 our %int = ( 
 	min_coda_son => 0,
-	min_son_dist => 1,
+	onset_son_dist => 1,
+	coda_son_dist => 1,
 	max_edge_son => 100,
 	min_nucl_son => 3
 );
-our %list = (
+for my $name (keys %int) {
+    no strict 'refs';
+    *$name = sub {
+        my $self = shift;
+        if (@_) {
+            $self->{ATTR}->{$name} = int shift;
+        }
+        return $self->{ATTR}->{$name};
+    };
+}
+
+our %hash = (
 	sonorous => { sonorant => 1,
 				  approximant => 1,
 				  aperture => 1,
 				  vocoid => 1 }
 );
+for my $name (keys %hash) {
+    no strict 'refs';
+    *$name = sub {
+        my $self = shift;
+        if (@_) {
+            my $href = shift;
+            return err "Argument to $name() must be a hash reference" unless _is($href, 'HASH');
+            $self->{ATTR}->{$name} = $href;
+        }
+        return $self->{ATTR}->{$name};
+    };
+}
+
 our %code = (
 	clear_seg => sub {1},
 	begin_adjoin => sub {0},
 	end_adjoin => sub {0}
 );
-
-=head1 METHODS
-
-=head2 new
-
-Returns a new Lingua::Phonology::Syllable object. Takes no arguments.
-
-=cut
-
+for my $name (keys %code) {
+    no strict 'refs';
+    *$name = sub {
+        my $self = shift;
+        if (@_) {
+            my $cref = shift;
+            return err "Argument to $name must be a code reference" unless _is($cref, 'CODE');
+            $self->{ATTR}->{$name} = $cref;
+        }
+        return $self->{ATTR}->{$name};
+    };
+}
+    
 sub new {
 	my $proto = shift;
 	my $class = ref($proto) || $proto;
-	my $self = { RULES => new Lingua::Phonology::Rules,
-				 ATTR => {}
-	};
+	my $self = bless { RULES => new Lingua::Phonology::Rules, ATTR => {} }, $class;
 	
-	# Initialize $self
-	$self->{ATTR}->{$_} = $bool{$_} for keys(%bool);
-	$self->{ATTR}->{$_} = $int{$_} for keys(%int);
-	$self->{ATTR}->{$_} = $list{$_} for keys(%list);
-	$self->{ATTR}->{$_} = $code{$_} for keys(%code);
+	# Initialize $self w/ defaults
+	$self->$_($bool{$_}) for keys(%bool);
+	$self->$_($int{$_}) for keys(%int);
+	$self->$_($hash{$_}) for keys(%hash);
+	$self->$_($code{$_}) for keys(%code);
 	
 	# Prepare the rules. This is the most important part
+    no warnings 'uninitialized';
 	$self->{RULES}->add_rule(
+        # Calculate all sonorities
 		CalcSon => {
 			do => sub { $_[0]->SON($self->sonority($_[0])) }
 		},
 
+        # Clear old syllabification
 		Clear => {
-			where => sub { &{$self->clear_seg}(@_) },
+			where => sub { $self->clear_seg->(@_) },
 			do => sub {
 				$_[0]->delink('SYLL', 'onset', 'Rime', 'nucleus', 'coda');
 			}
 		},
 
+        # Make CV syllables
 		CoreSyll => {
 			where => sub {
 				my $son = $_[0]->SON;
@@ -134,13 +183,14 @@ sub new {
 				);
 			},
 			do => sub {
-				$_[0]->nucleus(1) && $_[0]->Rime(1) && $_[0]->SYLL(1); # Make yourself a nucleus
-				if (
-					$_[-1]->SON <= $_[0]->SON &&
-				    $_[-1]->SON <= $self->max_edge_son &&
-					not $_[-1]->SYLL
+				$_[0]->nucleus(1); $_[0]->Rime(1); $_[0]->SYLL(1); # Make yourself a nucleus
+				# Make preceding C an onset if . . . 
+				if (   $self->onset # onsets allowed
+                    && $_[-1]->SON <= $_[0]->SON # less sonorous than you AND
+				    && $_[-1]->SON <= $self->max_edge_son # allowed to be non-nucleus AND
+			        && not $_[-1]->SYLL # not already syllabified
 				) {
-					$_[-1]->onset(1) && adjoin('SYLL', $_[0], $_[-1]); # make it an onset in this syll
+					$_[-1]->onset(1); flat_adjoin('SYLL', $_[0], $_[-1]);
 				}
 			}
 		},
@@ -148,40 +198,49 @@ sub new {
 		ComplexOnset => {
 			direction => 'leftward',
 			where => sub {
-				(not $_[0]->SYLL) &&
-				$_[1]->onset &&
-				$_[0]->SON <= $self->max_edge_son &&
-				(($_[1]->SON - $_[0]->SON) >= $self->min_son_dist)
+				   (not $_[0]->SYLL) # not yet syllabified
+				&& $_[1]->onset # following seg is an onset
+				&& $_[0]->SON <= $self->max_edge_son # this can be an onset
+				&& (($_[1]->SON - $_[0]->SON) >= $self->min_son_dist) # sonority distance respected
 			},
-			do => sub { adjoin('onset', $_[1], $_[0]) && adjoin('SYLL', $_[1], $_[0]) }
+			do => sub { adjoin('onset', $_[1], $_[0]); flat_adjoin('SYLL', $_[1], $_[0]); }
 		},
 
 		Coda => {
-			where => sub { (not $_[0]->onset)
-						   && $_[-1]->nucleus
-						   && $_[0]->SON <= $self->max_edge_son
-						   && $_[0]->SON >= $self->min_coda_son },
-			do => sub { $_[0]->coda(1) &&
-					    $_[0]->delink('nucleus') &&
-						adjoin('Rime', $_[-1], $_[0]) &&
-						adjoin('SYLL', $_[-1], $_[0])
-					  }
+			where => sub {  
+                   (not $_[0]->onset) # not an onset 
+                && $_[-1]->nucleus # follows a nucleus
+                && $_[0]->SON <= $self->max_edge_son # allowed to be an edge
+                && $_[0]->SON >= $self->min_coda_son # allowed to be a coda
+            },
+			do => sub { 
+                $_[0]->coda(1);
+                $_[0]->delink('nucleus');
+                flat_adjoin('Rime', $_[-1], $_[0]);
+                flat_adjoin('SYLL', $_[-1], $_[0]);
+            }
 		},
 
 		ComplexCoda => {
 			direction => 'rightward',
-			where => sub { (not $_[0]->SYLL)
-						   && $_[-1]->coda
-						   && $_[0]->SON <= $self->max_edge_son
-						   && $_[0]->SON >= $self->min_coda_son 
-						   && (($_[-1]->SON - $_[0]->SON) >= $self->min_son_dist) },
-			do => sub { adjoin('coda', $_[-1], $_[0]) && adjoin('Rime', $_[-1], $_[0]) && adjoin('SYLL', $_[-1], $_[0]) }
+			where => sub {    
+                   (not $_[0]->SYLL)
+                && $_[-1]->coda
+                && $_[0]->SON <= $self->max_edge_son
+                && $_[0]->SON >= $self->min_coda_son 
+                && (($_[-1]->SON - $_[0]->SON) >= $self->min_son_dist)
+            },
+			do => sub { 
+                adjoin('coda', $_[-1], $_[0]);
+                flat_adjoin('Rime', $_[-1], $_[0]);
+                flat_adjoin('SYLL', $_[-1], $_[0])
+            }
 		},
 
 		BeginAdjoin => {
 			direction => 'leftward',
 			where => sub {
-				my $cond1 = 1 if ((not $_[0]->SYLL) && $_[1]->onset && &{$self->begin_adjoin}(@_));
+				my $cond1 = 1 if ((not $_[0]->SYLL) && $_[1]->onset && $self->begin_adjoin->(@_));
 				my $cond2 = 1;
 				my $i = -1;
 				while ($cond2 && not $_[$i]->BOUNDARY) {
@@ -190,13 +249,16 @@ sub new {
 				}
 				return ($cond1 && $cond2);
 			},
-			do => sub { adjoin('onset', $_[1], $_[0]) && adjoin('SYLL', $_[1], $_[0]) }
+			do => sub { 
+                adjoin('onset', $_[1], $_[0]); 
+                flat_adjoin('SYLL', $_[1], $_[0]);
+            }
 		},
 
 		EndAdjoin => {
 			direction => 'rightward',
 			where => sub {
-				my $cond1 = 1 if ((not $_[0]->SYLL) && $_[-1]->coda && &{$self->end_adjoin}(@_));
+				my $cond1 = 1 if ((not $_[0]->SYLL) && $_[-1]->coda && $self->end_adjoin->(@_));
 				my $cond2 = 1;
 				my $i = 1;
 				while ($cond2 && not $_[$i]->BOUNDARY) {
@@ -205,7 +267,11 @@ sub new {
 				}
 				return ($cond1 && $cond2);
 			},
-			do => sub { adjoin('coda', $_[-1], $_[0]) && adjoin('Rime', $_[-1], $_[0]) && adjoin('SYLL', $_[-1], $_[0]) }
+			do => sub { 
+                adjoin('coda', $_[-1], $_[0]);
+                flat_adjoin('Rime', $_[-1], $_[0]);
+                flat_adjoin('SYLL', $_[-1], $_[0]) 
+            }
 		},
 
 		# This rule exists purely for data-collection purposes (see count_unparsed)
@@ -216,11 +282,200 @@ sub new {
 	);
 
 	# Be blessed
-	bless($self, $class);
 	return $self;	
-} # end new
+} 
+
+sub syllabify {
+	my $self = shift;
+
+	# Check for valid input
+	for (@_) {
+		return err("Bad input to syllabify()") unless _is_seg($_);
+	}
+
+	# Add the necessary features
+	$_[0]->featureset->add_feature(
+		SYLL => { type => 'scalar' },
+		onset => { type => 'privative' },
+		Rime => { type => 'privative' },
+		nucleus => { type => 'privative' },
+		coda => { type => 'privative' },
+		SON => { type => 'scalar' },
+	);
+    $_[0]->featureset->add_child('SYLL', 'onset', 'Rime');
+    $_[0]->featureset->add_child('Rime', 'nucleus', 'coda');
+
+	# Optimize the rule order
+	my @order = ('Clear', 'CalcSon', 'CoreSyll');
+	push(@order, 'ComplexOnset') if $self->complex_onset;
+	push(@order, 'Coda') if $self->coda;
+	push(@order, 'ComplexCoda') if $self->complex_coda;
+	push(@order, 'BeginAdjoin') if $self->begin_adjoin != $code{begin_adjoin};
+	push(@order, 'EndAdjoin') if $self->end_adjoin != $code{end_adjoin};
+	push(@order, 'Unparsed');
+	$self->{RULES}->order(@order);
+
+	# Are we in a rule (are these really RuleSegments)?
+	if (_is_ruleseg $_[0]) {
+		# Rewind the word (it fucks us up to start in the middle)
+		unshift(@_, pop(@_)) while not $_[-1]->BOUNDARY;
+		# Get rid of boundary segments
+		pop @_ while $_[-1]->BOUNDARY;
+	}
+
+	# Apply all rules
+	$self->{RULES}->apply_all(\@_);
+} 
+
+sub count_syll {
+	my $self = shift;
+	$self->{RULES}->count->{CoreSyll};
+}
+
+sub count_unparsed {
+	my $self = shift;
+	$self->{RULES}->count->{Unparsed};
+}
+
+# Calculate a segment's sonority
+sub sonority {
+	my $self = shift;
+	my $seg = shift;
+	my $son = 0;
+	for (keys(%{$self->sonorous})) {
+		$son += $self->{ATTR}->{sonorous}->{$_} if $seg->$_;
+	}
+	return $son;
+} 
+
+# min_son_dist sets both coda_son and onset_son
+sub min_son_dist {
+	my $self = shift;
+
+	if (@_) {
+		my $val = shift;
+		$self->coda_son_dist($val);
+		$self->onset_son_dist($val);
+	}
+	return $self->onset_son_dist;
+
+}
+
+# Sets the direction
+sub direction {
+	my ($self, $val) = @_;
+	if (defined($val)) {
+		$self->{RULES}->direction('CoreSyll', $val);
+		$self->{RULES}->direction('Coda', $val);
+	} 
+	return $self->{ATTR}->{direction} = $self->{RULES}->direction('CoreSyll');
+}
+
+sub loadfile {
+	my ($self, $file) = @_;
+
+    # Load defaults, but defaults are loaded with new()
+    return 1 if not defined $file;
+
+    my $parse;
+	eval { $parse = _parse_from_file($file, 'syllable') };
+    return err $@ if $@;
+
+    $self->_load_from_struct($parse);
+}
+
+sub _load_from_struct {
+    my ($self, $struct) = @_;
+
+    for (keys %$struct) {
+        # Accomodate set_ and no_ entries
+        my $bool = 1;
+        $bool = 1 if s/^set_//;
+        $bool = 0 if s/^no_//;
+		if (exists $bool{$_}) {
+			$self->$_($bool);
+		}
+		elsif (exists $hash{$_}) {
+			my $l = $_;
+			$self->$_( {map { $_ => $struct->{$l}->{feature}->{$_}->{score} } keys %{$struct->{$l}->{feature}}} );
+		}
+		elsif (exists $code{$_}) {
+            my $c = _parse_ext $struct->{$_};
+
+			if ($@) {
+				err("Errors processing $_ : $@");
+			}
+			else {
+				$self->$_($c);
+			}
+		}
+        # Most general, applicable for integers, direction, min_son_dist, etc.
+        else {
+            $self->$_($struct->{$_}->{value});
+        }
+	}
+    1;
+}
+    
+
+sub _to_str {
+	my ($self, $file) = @_;
+
+    require B::Deparse;
+
+	my $href = {};
+	for (keys %{$self->{ATTR}}) {
+		if (exists $bool{$_}) {
+            if ($self->$_) {
+                $href->{"set_$_"} = {};
+            }
+            else {
+                $href->{"no_$_"} = {};
+            }
+		}
+		elsif (exists $hash{$_}) {
+			my $l = $_;
+			$href->{$l}->{feature} = {};
+			for (keys %{$self->{ATTR}->{$l}}) {
+				$href->{$l}->{feature}->{$_} = { score => $self->{ATTR}->{$l}->{$_} };
+			}
+		}
+		elsif (exists $code{$_}) {
+			my $d = B::Deparse->new('-x7', '-p', '-si4');
+			$d->ambient_pragmas(strict => 'all', warnings => 'all');
+			my $code = _deparse_ext $self->{ATTR}->{$_}, $d or err $@;
+
+			$href->{$_} = [ $code . '  ' ]; # Extra whitespace for helping indent
+		}
+        # Takes car of %int and others
+        else {
+            $href->{$_} = { value => $self->$_ };
+        }
+	}
+
+	_string_from_struct({ syllable => $href });
+}
+
+1;
+
+__END__
+
+
+=head1 METHODS
+
+This section lists the methods not associated with any particular parameter.
+The items in the L<"PARAMETERS"> section also have methods associated with
+them.
+
+=head2 new
+
+    $syll = Lingua::Phonology::Syllable->new();
+
+Returns a new Lingua::Phonology::Syllable object. Takes no arguments.
 
 =head2 syllabify
+
+    $syll->syllabify(@word);
 
 Syllabifies an input word. The arguments to syllabify() should be a list of
 Lingua::Phonology::Segment objects. Those segments will be set to have the
@@ -252,92 +507,29 @@ This rule does a simple check to see if it's the first segment in the word,
 and then syllabifies. Syllabification only then happens once each time you
 apply the rule.
 
-=cut
-
-sub syllabify {
-	my $self = shift;
-
-	# Check for valid input
-	for (@_) {
-		return err("Bad input to syllabify()") unless UNIVERSAL::isa($_, 'Lingua::Phonology::Segment');
-	}
-
-	# Add the necessary features
-	$_[0]->featureset->add_feature(
-		SYLL => { type => 'scalar' },
-		onset => { type => 'privative' },
-		Rime => { type => 'privative' },
-		nucleus => { type => 'privative' },
-		coda => { type => 'privative' },
-		SON => { type => 'scalar' },
-	);
-
-	# Optimize the rule order
-	my @opt = ('Clear', 'CalcSon', 'CoreSyll');
-	push(@opt, 'ComplexOnset') if $self->complex_onset;
-	push(@opt, 'Coda') if $self->coda;
-	push(@opt, 'ComplexCoda') if $self->complex_coda;
-	push(@opt, 'BeginAdjoin') if $self->begin_adjoin != $code{begin_adjoin};
-	push(@opt, 'EndAdjoin') if $self->end_adjoin != $code{end_adjoin};
-	push(@opt, 'Unparsed');
-	$self->{RULES}->order(@opt);
-
-	# Are we in a rule (are these really RuleSegments)?
-	if (UNIVERSAL::isa($_[0], 'Lingua::Phonology::RuleSegment')) {
-		# Rewind the word (it fucks us up to start in the middle)
-		unshift(@_, pop(@_)) while not $_[-1]->BOUNDARY;
-		# Get rid of boundary segments
-		pop @_ while $_[-1]->BOUNDARY;
-	}
-
-	# Apply all rules
-	$self->{RULES}->apply_all(\@_);
-
-} # end syllabify
-
 =head2 count_syll
+
+    $sylls = $syll->count_syll;
 
 This is a simple data-collection method that takes no arguments. It returns the
 number of syllables created in the most recent call to C<syllabify>.
 
-=cut
-
-sub count_syll {
-	my $self = shift;
-	$self->{RULES}->count->{CoreSyll};
-}
-
 =head2 count_unparsed
+
+    $unparsed = $syll->count_unparsed;
 
 This is another data-collection method that takes no arguments. It returns the
 number of segments that were left unparsed in the most recent call to
 C<syllabify>.
 
-=cut
-
-sub count_unparsed {
-	my $self = shift;
-	$self->{RULES}->count->{Unparsed};
-}
-
 =head2 sonority
+
+    $sonority = $syll->sonority($segment);
 
 Takes a single Lingua::Phonology::Segment object as its argument, and
 returns an integer indicating the current calcuated sonority of the
 segment. The integer returned depends on the current value of the
 C<sonorous> property. See L<"sonorous"> for more information.
-
-=cut
-
-sub sonority {
-	my $self = shift;
-	my $seg = shift;
-	my $son = 0;
-	for (keys(%{$self->sonorous})) {
-		$son += $self->{ATTR}->{sonorous}->{$_} if $seg->$_;
-	}
-	return $son;
-} # end sonority
 
 =head1 ALGORITHM
 
@@ -356,20 +548,19 @@ the properties of the C<sonorous> parameter.
 
 =head2 Core syllabification
 
-In this step, basic CV syllables are formed. Nuclei are assigned to
-segments that are of equal or greater sonority than both adjacent segments,
-and which at least as sonorous as the minimum nucleus sonority
-(C<min_nucl_son>). The segments to the left of nuclei are assigned as
-onsets if they are not more sonorous than the maximum edge sonority
-(C<max_edge_son>) and have not already been assigned as nuclei.
+In this step, basic CV syllables are formed. Nuclei are assigned to segments
+that are of equal or greater sonority than both adjacent segments, and which at
+least as sonorous as the minimum nucleus sonority (C<min_nucl_son>). The
+segments to the left of nuclei are assigned as onsets if onsets are allowed
+(defined by C<onset>), they are not more sonorous than the maximum edge
+sonority (C<max_edge_son>), and they have not already been assigned as nuclei.
 
 =head2 Complex onset formation
 
-Complex onsets are formed if they are allowed (defined by
-C<complex_onset>). As many segments as possible are taken into the onset of
-the existing syllables, provided that they do not violate the minimum
-sonority distance (C<min_son_dist>) and do not exceed the maximum edge
-sonority.
+Complex onsets are formed if they are allowed (defined by C<complex_onset>). As
+many segments as possible are taken into the onset of the existing syllables,
+provided that they do not violate the minimum sonority distance in the onset
+(C<onset_son_dist>) and do not exceed the maximum edge sonority.
 
 =head2 Coda formation
 
@@ -407,6 +598,25 @@ These parameters are used to determine the behavior of the syllabification
 algorithm. They are all accessible with a variety of get/set methods. The
 significance of the parameters and the methods used to access them are
 described below.
+
+=head2 onset
+
+B<Boolean>, default true.
+
+    # Return the current setting
+    $syll->onset;
+
+    # Allow onsets
+    $syll->onset(1);
+    $syll->set_onset;
+
+    # Disallow onsets
+    $syll->onset(0);
+    $syll->no_onset;
+
+If this parameter is true, onsets are allowed. When nuclei are formed, the
+segment preceding the nucleus will be taken as the onset of the syllable if
+other parameters allow. Note that pretty much all languages allow onsets.
 
 =head2 complex_onset
 
@@ -473,14 +683,45 @@ B<Integer>, default 1.
 	# Return the current value
 	$syll->min_son_dist;
 
-	# Set the value;
+	# Set the value
 	$syll->min_son_dist(2);
 
 This determines the B<min>imum B<son>ority B<dist>ance between members of a
 coda or onset. Within a coda or onset, adjacent segments must differ in
-sonority by at least this amount. This has no effect unless C<complex_onset> or
+sonority by at least this amount. Setting this value sets both coda_son_dist
+and onset_son_dist (see below). This has no effect unless C<complex_onset> or
 C<complex_coda> is set to true. The default value is 1, which means that stop +
 nasal sequences like /kn/ will be valid onsets (if complex_onset is true);
+
+=head2 coda_son_dist
+
+B<Integer>, default 1
+
+    # Return the current value
+    $syll->coda_son_dist;
+
+    # Set the value
+    $syll->coda_son_dist(2);
+
+This parameter allows you finer control over the minimum sonority distance by
+allowing you to set the minimum sonority distance in codas separately from
+onsets. This sets the minimum sonority difference between adjacent segments in
+codas only.
+
+=head2 onset_son_dist
+
+B<Integer>, default 1
+
+    # Return the current value
+    $syll->onset_son_dist;
+
+    # Set the value
+    $syll->onset_son_dist(2);
+
+This parameter allows you finer control over the minimum sonority distance by
+allowing you to set the minimum sonority distance in codas separately from
+onsets. This sets the minimum sonority difference between adjacent segments in
+onsets only.
 
 =head2 min_coda_son
 
@@ -559,18 +800,6 @@ onsets and codas if there is some ambiguity. This chart gives some examples:
 	Complex onsets and complex codas
 	  /duin/               <dujn>            <dwin>
 
-=cut
-
-sub direction {
-	my $self = shift;
-	my $val = shift;
-	if (defined($val)) {
-		$self->{RULES}->direction('CoreSyll', $val);
-		$self->{RULES}->direction('Coda', $val);
-	} # end if
-	return $self->{RULES}->direction('CoreSyll');
-} # end plateau_nucl
-
 =head2 sonorous
 
 B<Hash reference>, default:
@@ -612,21 +841,9 @@ classes and values:
 	3: High Vocoids
 	4: Non-high vocoids
 
-=cut
-
-sub sonorous {
-	my $self = shift;
-	my $attrs = shift;
-	if (defined $attrs) {
-		return err("Non-hash reference argument to sonorous") if ref($attrs) ne 'HASH';
-		$self->{ATTR}->{sonorous} = $attrs;
-	}
-	return $self->{ATTR}->{sonorous};
-} # end sonorous
-
 =head2 clear_seg
 
-B<Code>, default C<sub {1}>.
+B<Code>, default clears all segs.
 
 	# Return the current value
 	$syll->clear_seg;
@@ -676,116 +893,9 @@ additional constraints other than the ones present in the code reference
 here must be met in order for beginning-adjunction to happen, as described
 in the L<"ALGORITHM"> section.
 
-=cut
-
-# Automatically load attribute methods
-our $AUTOLOAD;
-sub AUTOLOAD {
-	my $self = shift;
-	my $method = $AUTOLOAD;
-	$method =~ s/.*:://;
-	my $bool_val = 0 if $method =~ s/^no_(\w+)/$1/;
-	$bool_val = 1 if $method =~ s/^set_(\w+)/$1/;
-
-	# Integer methods
-	if (exists $int{$method}) {
-		eval qq! sub $method {
-			my \$self = shift;
-			my \$val = shift;
-			if (defined(\$val)) {
-				err("Non-integer argument to $method") if \$val ne int(\$val);
-				\$self->{ATTR}->{$method} = int(\$val);
-			} # end if
-			return \$self->{ATTR}->{$method};
-		} # end sub
-		!; # end eval
-		$self->$method(@_);
-	} # end if
-
-	# Boolean methods
-	elsif (exists $bool{$method}) {
-		if ($bool_val) {
-			eval qq! sub set_$method {
-				my \$self = shift;
-				\$self->{ATTR}->{$method} = 1;
-			} #end sub
-			!; # end eval
-			no strict 'refs';
-			&{"set_$method"}($self);
-		} # end if
-		elsif (defined($bool_val)) {
-			eval qq! sub no_$method {
-				my \$self = shift;
-				\$self->{ATTR}->{$method} = 0;
-				return 1;	
-			} # end sub
-			!; # end eval
-			no strict 'refs';
-			&{"no_$method"}($self);
-		} # end elsif
-		else {
-			eval qq! sub $method {
-				my \$self = shift;
-				my \$val = shift;
-				if (defined(\$val)) {
-					if (\$val) {
-						\$self->{ATTR}->{$method} = 1;
-					}
-					else {
-						\$self->{ATTR}->{$method} = 0;
-					}
-					return 1; # To always return true when assigning
-				} # end if
-				return \$self->{ATTR}->{$method};
-			} # end sub
-			!; # end eval
-			$self->$method(@_);
-		} # end else
-	} # end else
-
-	# List methods
-	elsif (exists $list{$method}) {
-		eval qq! sub $method {
-			my \$self = shift;
-			my \@list = \@_;
-			if (\@list) {
-				\$self->{ATTR}->{$method} = \\\@list;
-			}
-			return \@{\$self->{ATTR}->{$method}};
-		} # end sub
-		!; # end eval
-		$self->$method(@_);
-	} # end else
-
-	# Code methods
-	elsif (exists $code{$method}) {
-		eval qq! sub $method {
-			my \$self = shift;
-			my \$val = shift;
-			if (ref(\$val) eq 'CODE') {
-				\$self->{ATTR}->{$method} = \$val;
-			}
-			elsif (defined(\$val)) {
-				err("Non-code reference argument to $method");
-			}
-			return \$self->{ATTR}->{$method};
-		} # end sub
-		!; # end eval
-		$self->$method(@_);
-	} # end else
-
-} # end AUTOLOAD
-
-sub err {
-	carp shift if warnings::enabled();
-	return undef;
-} # end err  
-
-1;
-
 =head1 AUTHOR
 
-Jesse S. Bangs <F<jaspax@u.washington.edu>>.
+Jesse S. Bangs <F<jaspax@cpan.org>>
 
 =head1 LICENSE
 

@@ -4,7 +4,7 @@
 
 use strict;
 use warnings;
-use Test::More tests=>47;
+use Test::More tests => 56;
 use Lingua::Phonology;
 
 BEGIN {
@@ -20,16 +20,16 @@ ok my $syll = new Lingua::Phonology::Syllable, 'new as a class method';
 ok my $other_syll = $syll->new, 'new as an object method';
 
 # simple test of return values for boolean methods
-for ('complex_onset','coda','complex_coda') {
+for ('onset', 'complex_onset','coda','complex_coda') {
 	ok $syll->$_(1), "test assign true to $_";
 	is $syll->$_, 1, "test result of $_(1)";
-	ok $syll->$_(0), "test assign false to $_";
+	ok !$syll->$_(0), "test assign false to $_";
 	is $syll->$_, 0, "test result of $_(0)";
 	my $method = 'set_' . $_;
 	ok $syll->$method, "test $method";
 	is $syll->$_, 1, "test result of $method";
 	$method = 'no_' . $_;
-	ok $syll->$method, "test $method";
+	ok !$syll->$method, "test $method";
 	is $syll->$_, 0, "test result of $method";
 
 	# Put things back how you found them.
@@ -45,9 +45,17 @@ my @word = $phono->symbols->segment(split(//, 'skraduipnts'));
 # syllabify() is used repeatedly from here on out, but we'll only check it
 # once. We'll also not bother to recheck the okayness of the boolean methods
 # (but we will check the others).
+
 # default CV syllables.
+$syll->set_onset;
 ok $syll->syllabify(@word), 'test syllabify';
 is spell_syll(@word), 'sk<ra><du><i>pnts', 'test CV syllabification';
+
+# no onsets, only V syllables
+$syll->no_onset;
+$syll->syllabify(@word);
+is spell_syll(@word), 'skr<a>d<u><i>pnts', 'test V syllabification';
+$syll->set_onset;
 
 # Complex onsets allowed
 $syll->set_complex_onset;
