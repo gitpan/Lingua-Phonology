@@ -46,19 +46,32 @@ use warnings;
 use warnings::register;
 use Lingua::Phonology::Common;
 use Lingua::Phonology::Features;
+use constant {
+    REF => 0,
+    NUM => 1,
+    TXT => 2
+};
 
 # Magical stuff:
 # Automatically spell segments in string context
-=out temporarily, to be added
-use overload
-    '""' => sub { 
-		if ($_[0]->{SYMBOLS}) {
-			return $_[0]->spell;
-		}
-		return $_[0];
-	}
-;
-=cut
+use overload 
+    # The fun stuff
+    '""' => sub { defined $_[0]->{SYMBOLS} ? $_[0]->spell : overload::StrVal($_[0]) },
+    'cmp' => sub { 
+        my ($l, $r, $swap) = @_;
+        if ($swap) { return "$r" cmp "$l" }
+        else { return "$l" cmp "$r" } },
+    
+    # A rediculous hack to return the non-overloaded number value. In theory,
+    # '0+' => sub { $_[0] } *should* do this, but it makes the debugger
+    # segfault.  This procedure is borrowed from overload.pm itself.
+    '0+' => sub { 
+        my $package = ref $_[0]; 
+        bless $_[0], 'my::Fake'; 
+        my $rv = int $_[0]; 
+        bless $_[0], $package; 
+        return $rv },
+    'fallback' => 1;
 
 our $VERSION = 0.3;
 
@@ -71,7 +84,7 @@ sub new {
 	my $self = {
 		FEATURES => undef,
 		SYMBOLS => undef,
-		WANT => 'ref', # 'text', 'number', or 'ref'
+		WANT => REF, #  REF, NUM, or TXT
 		VALUES   => { }
 	};
 
@@ -124,13 +137,13 @@ sub symbolset {
 
 sub value {
 	my $self = shift;
-	local $self->{WANT} = 'number';
+	local $self->{WANT} = NUM;
 	$self->value_ref(@_);
 }
 
 sub value_text {
 	my $self = shift;
-	local $self->{WANT} = 'text';
+	local $self->{WANT} = TXT;
 	$self->value_ref(@_);
 }
 
@@ -207,10 +220,10 @@ sub value_ref {
 		#no strict 'refs';
 		#no warnings 'uninitialized';
 
-		if ($self->{WANT} eq 'text') {
+		if ($self->{WANT} == TXT) {
 			$retval = $self->{FEATURES}->text_form($feature, $$retval);
 		}
-		elsif ($self->{WANT} eq 'number') {
+		elsif ($self->{WANT} == NUM) {
 			$retval = $$retval;
 		}
 	}
@@ -264,7 +277,7 @@ sub delink {
 	my @return = ();
 	for (@_) {
 		push @return, delete($self->{VALUES}->{$_});
-		push @return, $self->delink($_) for ($self->{FEATURES}->children($_));
+		push @return, $self->delink($self->{FEATURES}->children($_));
 	}
 	return @return;
 } 
@@ -273,7 +286,8 @@ sub all_values {
 	my $self = shift;
 
 	# Get the real values for each feature
-	return map { $_ => ${$self->{VALUES}->{$_}} } keys %{$self->{VALUES}};
+    my %h = map { $_ => ${$self->{VALUES}->{$_}} } keys %{$self->{VALUES}};
+    return wantarray ? %h : \%h;
 } 
 
 sub spell {
@@ -311,17 +325,47 @@ sub AUTOLOAD {
 	$self->$feature(@_);
 } 
 
-# Clear out external references and potentially circular feature values
-sub DESTROY {
-	my $self = shift;
-	$self->clear;
-	undef $self->{FEATURES};
-	undef $self->{SYMBOLS};
-}
+sub DESTROY {}
 
 1;
 
 __END__
+
+=head1 OVERLOADING
+
+As of Lingua::Phonology v0.32 (Lingua::Phonology::Segment v0.4), string
+conversion of segments is overloaded. When you use a Lingua::Phonology::Segment
+in string context, the C<spell()> method is automatically called, and the
+representation of the segment from the current symbolset is returned. String
+comparison operators (C<cmp eq ne lt le gt ge>) are also overloaded. Therefore,
+the following work correctly, assuming that you have a Lingua::Phonology object
+correctly set up in C<$phono>.
+
+    my ($b, $k) = $phono->symbols->segment('b', 'k');
+
+    print "Segments: $b, $k\n";                  # Prints "Segments: b, k";
+    print "$b is greater than $k\n" if $b gt $k; # Won't print
+    print "$b is less than $k\n" if $b lt $k;    # Prints 'b is less than k';
+    print "$b is equal to $k\n" if $b eq $k;     # Won't print
+
+    my $b2 = $b->duplicate;
+    print "$b is equal to $b2\n" if $b eq $b2    # Prints 'b is equal to b';
+
+Note that stringification is not overloaded if the C<symbolset> is not properly
+set. However, it turns on as soon as a symbolset is available:
+
+    my $b = Lingua::Phonology::Segment->new($features);
+    $b->voice(1);
+    $b->labial(1);
+
+    print "$b\n";             # Prints 'Lingua::Phonology::Segment=HASH(0x88af598)'
+                              # or something similar, because there is no symbolset
+                              # defined for spelling the segment.
+
+    $b->symbolset($symbols);
+    print "$b\n";             # Prints 'b'
+
+Number conversion is not overloaded.
 
 =head1 METHODS
 
@@ -335,7 +379,9 @@ Lingua::Phonology::Features object. The Features object provides the list of
 available features. If no such object is provided, this method will carp and
 return undefined. When called as an object method, the featureset may be
 omitted, in which case the feature set from the calling object will be
-provided.
+provided. When called as an object method, C<new()> does not copy the features
+values of the calling object, only the feature set. To create a complete
+duplicate of the calling object, use L<"duplicate">.
 
 In either case, a second argument may be provided, which must be a hash
 reference. If this argument exists, it must contain C<< feature => value >>
@@ -549,20 +595,22 @@ Calling delink() on a feature with children causes all children of the feature
 to be delinked recursively. This is the only way to reliably undefine a feature
 and all of its children.
 
-In scalar context, this method returns the number of items that were
-delinked. In list context, it returns a list of the former values of the
-features that were delinked. If you are delinking a node you will get a
-list of the values of the children of that node, in a consistent but not
+In scalar context, this method returns the number of items that were delinked.
+In list context, it returns a list of the former values of the features that
+were delinked. If you are delinking a feature with children you will get a list
+of the values of the children of that feature, in a consistent but not
 predictable order.
 
 =head2 all_values
 
     %values = $seg->all_values();
+    $values = $seg->all_values();
 
-Takes no arguments. Returns a hash with feature names as its keys and 
-feature values as its values. The feature names present in the hash will
-be those that have defined values for the segment, or those features that
-were explicitly set to be undef (as opposed to being C<delink>ed).
+Takes no arguments. In list context, returns a hash with feature names as its
+keys and feature values as its values. In scalar context returns similar hash
+reference. The feature names present in the hash or hash reference will be
+those that have defined values for the segment, or those features that were
+explicitly set to be undef (as opposed to being C<delink>ed).
 
 =head2 spell
 
@@ -588,6 +636,11 @@ references--the two segments will be able to diverge completely independently.
 
 Takes no arguments. Clears all values from the segment. Calling
 L<"all_values">() after calling clear() will return an empty hash.
+
+=head1 BUGS
+
+A bug in the implementation of overloading can cause infinite loops and
+segmentation faults when using the debugger with Lingua::Phonology::Segment.
 
 =head1 SEE ALSO
 

@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 31;
+use Test::More tests => 32;
 
 # Use the module
 BEGIN {
@@ -91,9 +91,14 @@ my %vals = $seg->all_values;
 ok(($vals{privative} eq 1 &&
 	$vals{binary} eq 0 &&
 	not exists($vals{scalar})),
-	'all_values()');
+	'all_values() in list context');
+
+my $vals = $seg->all_values;
+is_deeply \%vals, $vals, 'all_values in scalar context';
 
 {
+    # Get something in both list and scalar context
+    my @trash = $seg->ROOT;
     my $trash = $seg->ROOT;
     is_deeply \%vals, { $seg->all_values }, 'all_values unchanged after getting value';
 }
@@ -119,8 +124,8 @@ ok((not $seg3->spell), 'failure of spell()');
 # duplicate
 my $copy = $seg->duplicate;
 is_deeply { $seg->all_values }, { $copy->all_values }, 'proper duplication';
-isnt $seg, $copy, 'duplicate is different ref';
+isnt int $seg, int $copy, 'duplicate is different ref';
 
 # clear
 $seg->clear;
-ok((not $seg->all_values), 'clear()');
+ok((not keys %{$seg->all_values}), 'clear()');

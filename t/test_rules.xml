@@ -31,7 +31,16 @@
             [labial][vocoid] => [*voice][labial] : _[dorsal]
         </rule>
         <rule name="MultipleInsert">
-            [Coronal] 0 [Coronal] => [] /i/ [] : _[*vocoid]
+            [Coronal] 0 [Coronal] => [] /a/ [] : _[*vocoid]
+        </rule>
+        <rule name="MultipleNull">
+            00 => /a//d/ : /t/_$
+        </rule>
+        <rule name="LboundInsert" >
+            0 => /e/ : $_/s/[*vocoid]
+        </rule>
+        <rule name="RboundInsert" >
+            0 => /"@"/ : [*vocoid]_$
         </rule>
 	</rules>
 </phonology>

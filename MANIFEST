@@ -16,6 +16,7 @@ Phonology/Segment/Tier.pm
 Phonology/Segment/Boundary.pm
 Phonology/Syllable.pm
 Phonology/Symbols.pm
+Phonology/Word.pm
 t/00phono.t
 t/01features.t
 t/02segment.t
@@ -25,5 +26,6 @@ t/05functions.t
 t/06syllable.t
 t/07loadfile.t
 t/08lingrules.t
+t/09word.t
 t/test.xml
 t/test_rules.xml

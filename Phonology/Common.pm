@@ -9,6 +9,7 @@ package Lingua::Phonology::Common;
 # getting, and the funcs all begin with _, so are unlikely to clash anyway
 @ISA = qw(Exporter);
 @EXPORT = qw(
+    _err
 	_is
 	_is_features
 	_is_symbols
@@ -16,6 +17,7 @@ package Lingua::Phonology::Common;
 	_is_seg
 	_is_boundary
 	_is_ruleseg
+    _is_tier
     _to_handle
 	_parse_from_file
 	_parse_from_string
@@ -30,15 +32,18 @@ $VERSION = 0.1;
 use strict;
 use warnings::register;
 
-use Carp qw/croak/;
+use Carp qw/carp croak/;
 our @CARP_NOT = qw/
     Lingua::Phonology
     Lingua::Phonology::Features
     Lingua::Phonology::Symbols
     Lingua::Phonology::Segment
     Lingua::Phonology::Segment::Rules
+    Lingua::Phonology::Segment::Tier
+    Lingua::Phonology::Segment::Boundary
     Lingua::Phonology::Rules
     Lingua::Phonology::Syllable
+    Lingua::Phonology::Word
 /;
 use IO::Handle;
 use XML::Simple;
@@ -66,6 +71,7 @@ sub _is_symbols ($) { _is(shift, 'Lingua::Phonology::Symbols') }
 sub _is_syllable ($) { _is(shift, 'Lingua::Phonology::Syllable') }
 sub _is_boundary ($) { _is(shift, 'Lingua::Phonology::Segment::Boundary') }
 sub _is_ruleseg ($) { _is(shift, 'Lingua::Phonology::Segment::Rules') }
+sub _is_tier ($) { _is(shift, 'Lingua::Phonology::Segment::Tier') }
 
 # _is_seg is hacked to allow various segment lookalikes
 sub _is_seg ($) { 
@@ -144,6 +150,11 @@ sub _deparse_ext ($$) {
     #$string =~ s/^\s*(.*?)\s*$/$1/s; # String leading/trailing whitespace
     $string =~ s/\$_\[(-?\d+)\]->/$1:/gs; # Do ext conversion
     return $string;
+}
+
+sub _err ($) {
+    carp shift;
+    return;
 }
 
 1;

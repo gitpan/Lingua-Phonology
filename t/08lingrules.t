@@ -1,8 +1,8 @@
 #!/usr/bin/perl
 
 use strict;
-use warnings;
-use Test::More tests => 23;
+#use warnings; # Uncomment for debugging
+use Test::More tests => 41;
 use Lingua::Phonology;
 
 my $phono = new Lingua::Phonology;
@@ -12,26 +12,14 @@ $phono->loadfile;
 ok $phono->rules->loadfile('t/test_rules.xml'), 'load ling rules file';
 $phono->symbols->drop_symbol('j', 'w', 'H'); # Simplifies rules where we don't want to syllabify
 
-# For debugging
-$phono->savefile('test_rules_out.xml');
-
 # Simple spell
-{
-    my @w1 = word('si', $phono);
-
-    ok $phono->rules->SimpleSpell(\@w1), 'SimpleSpell applies safely';
-    is $phono->symbols->spell(@w1), 'Si', 'results of SimpleSpell as expected';
-}
+testify('SimpleSpell', 'si', 'Si');
 
 # Simple featural
-{
-    my @w1 = word('by', $phono);
+testify('SimpleFeatural', 'by', 'bi');
 
-    ok $phono->rules->SimpleFeatural(\@w1), 'SimpleFeatural applies safely';
-    is $phono->symbols->spell(@w1), 'bi', 'result of SimpleFeatural as expected';
-}
-
-# Quote values - test that strange values from the file are loaded/escaped correctly
+# Quote values - test that strange values from the file are loaded/escaped
+# correctly. Can't be done w/ testify
 {
     my $s1 = $phono->segment;
     $s1->aperture(q{"''});
@@ -40,7 +28,8 @@ $phono->savefile('test_rules_out.xml');
     is $s1->aperture, q{''`%^$><" foo}, 'result of QuoteValue as expected';
 }
 
-# Featural types - test test/assignment to all types of feature
+# Featural types - test test/assignment to all types of feature. Also can't be
+# done with testify.
 {
     my $s1 = $phono->segment;
     $s1->anterior(0);
@@ -62,50 +51,63 @@ $phono->savefile('test_rules_out.xml');
 }
 
 # Inserting a segment
-{
-    my @w1 = word('ask', $phono);
-    ok $phono->rules->Insert(\@w1), 'Insert applies safely';
-    is $phono->symbols->spell(@w1), 'asik', 'result of Insert as expected';
-}
+testify('Insert', 'ask', 'asik');
 
 # Segment sets
-{
-    my @word = word('adtagtam', $phono);
-    ok $phono->rules->SegmentSet(\@word), 'SegmentSet applies safely';
-    is $phono->symbols->spell(@word), 'ahtahtah', 'result of SegmentSet as expected';
-}
+testify('SegmentSet', 'adtagtam', 'ahtahtah');
 
 # Condition set
-{
-    my @word = word('estad', $phono);
-    ok $phono->rules->ConditionSet(\@word), 'ConditionSet applies safely';
-    is $phono->symbols->spell(@word), 'essas', 'result of ConditionSet as expected';
-}
+testify('ConditionSet', 'estad', 'essas');
 
 # Multiple segs - delete
-{
-    my @word = word('ska', $phono);
-    ok $phono->rules->MultipleDelete(\@word), 'MultipleDelete applies safely';
-    is $phono->symbols->spell(@word), 'Sa', 'result of MultipleDelete as expected'
-}
+testify('MultipleDelete', 'ska', 'Sa');
 
 # Multiple Change
-{
-    my @word = word('big', $phono);
-    ok $phono->rules->MultipleChange(\@word), 'MultipleChange applies safely';
-    is $phono->symbols->spell(@word), 'pyg', 'result of MultipleChange as expected';
-}
+testify('MultipleChange', 'big', 'pyg');
 
 # Multiple insert
-{
-    my @word = word('strap', $phono);
-    ok $phono->rules->MultipleInsert(\@word), 'MultipleInsert applies safely';
-    is $phono->symbols->spell(@word), 'sitrap', 'result of MultipleInsert as expected';
-}
+testify('MultipleInsert', 'strap', 'satrap');
 
+# Multiple null
+testify('MultipleNull', 'kat', 'katad');
 
+# Insert at left
+testify('LboundInsert', 'sta', 'esta');
+
+# Insert at right
+testify('RboundInsert', 'pal', 'pal@');
+
+# Check loading lingrules from add_rule
+ok $phono->rules->add_rule('Test' => { linguistic => '/k/ => /?/ : _$' } ), 'linguistic add_rule';
+testify('Test', 'tak', 'ta?');
+
+# Various kinds of rules that should fail
+perjure('Missing ]', '[nasal] => [*voice');
+perjure('Missing [', 'voice] => [+continuant]');
+perjure('Missing /', '/s/ => /S');
+perjure('Missing (', '/t/|/d/) => /s/ : _/s/');
+perjure('Missing )', '(/t/|/d/ => /s/ : _/s/');
+perjure('Misplaced Bound', '/s/$ => /S/$');
+perjure('Null in Set', '/s/(/r/|/l/|0) => /S/0');
+{ local $TODO = "Fails"; perjure('Null in When', '/k/ => /"?"/ : _0/t/'); }
+perjure('Set in To', '/k/ => (/g/|/h/)');
+
+# Debugging - comment out for production
+$phono->savefile('test_rules_out.xml');
 
 sub word {
     my ($word, $phono) = @_;
     return $phono->symbols->segment(split //, $word);
+}
+
+sub testify {
+    my ($rule, $in, $out) = @_;
+    my @word = word($in, $phono);
+    ok $phono->rules->$rule(\@word), "$rule applies safely";
+    is $phono->symbols->spell(@word), $out, "result of $rule as expected";
+}
+
+sub perjure {
+    my ($rule, $ling) = @_;
+    ok !$phono->rules->add_rule($rule => { linguistic => $ling }), "failure of $rule";
 }

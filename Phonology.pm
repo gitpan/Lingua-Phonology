@@ -2,7 +2,7 @@
 
 package Lingua::Phonology;
 
-$VERSION = 0.31;
+$VERSION = 0.32;
 
 use strict;
 use warnings;
@@ -56,6 +56,8 @@ multiple segment objects to be programatically manipulated.
 =cut
 
 # Remainder of POD is after the __END__ token
+
+sub err ($) { warnings::warnif(shift); return; };
 
 # Constructor - creates new (empty) objects
 sub new {
@@ -128,7 +130,7 @@ sub loadfile {
     else {
         my $parse;
         eval { $parse = _parse_from_file $file };
-        return err $@ unless $parse;
+        return err($@) unless $parse;
 
         for (@accessors) {
             $self->$_->_load_from_struct($parse->{$_}) or $err = 1;
@@ -151,7 +153,7 @@ sub savefile {
     $str = "<?xml version=\"1.0\" standalone=\"yes\" ?>\n<phonology>$str</phonology>\n";
 
     eval { $file = _to_handle($file, '>') };
-    return err $@ if $@;
+    return err($@) if $@;
 
     print $file $str;
     return $str;

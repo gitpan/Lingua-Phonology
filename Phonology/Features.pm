@@ -65,7 +65,7 @@ use warnings::register;
 use Carp;
 use Lingua::Phonology::Common;
 
-sub err ($) { warnings::warnif(shift); return; }
+sub err ($) { _err($_[0]) if warnings::enabled() };
 
 our $VERSION = 0.2;
 
@@ -220,9 +220,9 @@ sub all_features {
 # Get array of children
 sub children {
 	my ($self, $feature) = @_; 
-	my $featureref = $self->feature($feature) or return;
-
-	return keys %{$featureref->{child}};
+    return exists $self->{$feature} ?
+           keys %{$self->{$feature}->{child}} :
+           err "No such feature '$feature'";
 }
 
 # Add a new child to a parent
@@ -273,10 +273,10 @@ sub drop_child {
 
 # Get current parents
 sub parents {
-	my ($self, $child) = @_;
-    my $childref = $self->feature($child) or return;
-
-    return keys %{$childref->{parent}};
+	my ($self, $feature) = @_;
+    return exists $self->{$feature} ?
+           keys %{$self->{$feature}->{parent}} :
+           err "No such feature '$feature'";
 }
 
 # Add a parent

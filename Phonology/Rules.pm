@@ -31,27 +31,34 @@ the L<"WRITING RULES"> section.
 
 =over 4
 
-=item *
+=item * domain
 
-B<domain> - defines the domain within which the rule applies. This should be
+Defines the domain within which the rule applies. This should be
 the name of a feature in the featureset of the segments which the rule is
 applied to.
 
-=item *
+=item * tier
 
-B<tier> - defines the tier on which the rule applies. Must be the name of a
+Defines the tier on which the rule applies. Must be the name of a
 feature in the feature set for the segments of the word you pass in.
 
-=item *
+=item * direction
 
-B<direction> - defines the direction that the rule applies in. Must be 
+Defines the direction that the rule applies in. Must be 
 either 'leftward' or 'rightward.' If no direction is given, defaults to
 'rightward'.
 
-=item *
+=item * filter
 
-B<filter> - defines a filter for the segments that the rule applies on.
+Defines a filter for the segments that the rule applies on.
 Must a code reference that returns a truth value.
+
+=item * linguistic
+
+Defines a linguistic-style rule to be parsed. When you provide a
+linguistic-style rule, it is parsed into code references that take the place of
+the C<where> and C<do> properties listed below. The format of linguistic rules
+is described in L<Lingua::Phonology::FileFormatPOD/"LINGUISTIC-STYLE RULES">.
 
 =item *
 
@@ -85,17 +92,22 @@ use warnings;
 use warnings::register;
 use Carp;
 use Lingua::Phonology::Common;
+use Lingua::Phonology::Word;
 use Lingua::Phonology::Segment::Rules;
 use Lingua::Phonology::Segment::Boundary;
 use Lingua::Phonology::Segment::Tier;
 # use Whatif if it's available
 BEGIN {
-	eval 'sub whatif (&;$) {}' if not eval 'use Whatif; 1';
+	eval { sub whatif (&;$) {} } unless eval { use Whatif; 1; };
 }
 
 our $VERSION = 0.3;
 
-sub err ($) { warnings::warnif(shift); return; }
+sub err ($) { _err($_[0]) if warnings::enabled() };
+
+# This variable is created the first time someone tries to parse a lingustic
+# rule, and reused thereafter
+our $PARSER;
 
 # Define valid properties for rules, name => default format. undef's for no default
 our %property = (
@@ -112,23 +124,43 @@ our %property = (
 our %valid = (
     where => sub { _is($_[0], 'CODE') },
     do => sub { _is($_[0], 'CODE') },
-    filter => sub { _is($_[0], 'CODE') },
     result => sub { _is($_[0], 'CODE') },
+    filter => sub { _is $_[0], 'CODE' },
     tier => sub {1},
     domain => sub {1},
-    direction => sub { $_[0] = lc $_[0]; ($_[0] eq 'leftward') or ($_[0] eq 'rightward') }
+    direction => sub { $_[0] = lc $_[0]; $_[0] eq 'rightward' || $_[0] eq 'leftward' }
 );
+
+# List of properties passed on to Lingua::Phonology::Word
+our %worder = (
+    filter => undef,
+    tier => undef,
+    domain => undef,
+    direction => undef
+);
+
+for my $method (keys %worder) {
+    no strict 'refs';
+    *$method = sub {
+        my $self = shift;
+        my $rule = shift;
+        return err "No such rule '$rule'" unless exists $self->{RULES}->{$rule};
+        $self->{RULES}->{$rule}->{word}->$method(@_);
+    }
+}
 
 # Additional arrays that list properties expecting code and text respectively
 our @code = qw/where do filter result/;
 our @text = qw/tier domain direction/;
 
 # Build accessors for properties
-foreach my $method (keys %property) {
+foreach my $method (keys %valid) {
+    next if exists $worder{$method};
     no strict 'refs';
     *$method = sub {
         my $self = shift;
         my $rule = shift;
+        return err "No such rule '$rule'" unless exists $self->{RULES}->{$rule};
         if (@_) {
             # When defined, check for validity and add
             if (defined $_[0]) {
@@ -147,9 +179,6 @@ foreach my $method (keys %property) {
         return $self->{RULES}->{$rule}->{$method};
     };
 }
-
-# The same BOUNDARY seg is used by all instances (since all are alike)
-our $BOUNDARY = Lingua::Phonology::Segment::Rules->new(Lingua::Phonology::Segment::Boundary->new());
 
 # Constructor
 sub new {
@@ -172,7 +201,7 @@ sub add_rule {
 
 	RULE: for my $rule (keys(%rules)) {
         # Check rules or complain
-        $self->_check_rule($rules{$rule}) or do {
+        $self->_check_rule($rules{$rule}, $rule) or do {
             $err = 1;
             next RULE;
         };
@@ -208,7 +237,7 @@ sub change_rule {
         }
 
         # Check rules
-        $self->_check_rule($rules{$rule}) or do {
+        $self->_check_rule($rules{$rule}, $rule) or do {
             $err = 1;
             next RULE;
         };
@@ -220,11 +249,22 @@ sub change_rule {
 }
 
 sub _check_rule {
-    my ($self, $href) = @_;
+    my ($self, $href, $name) = @_;
+    # Parse ling rules
+    if (exists $href->{linguistic}) {
+        ($href->{where}, $href->{do}) = _parse_ling($href->{linguistic});
+        unless ($href->{where} && $href->{do}) {
+            return err "Couldn't parse linguistic rule for '$name'";
+        }
+        $href->{where} = _parse_ext($href->{where});
+        $href->{do} = _parse_ext($href->{do});
+    }
+
+    # Validate keys
     for (keys %$href) {
         if (exists $valid{$_}) {
             unless ($valid{$_}->($href->{$_})) {
-                return err("Invalid value for $_");
+                return err("Invalid value for $_ in rule '$name'");
             }
         }
     }
@@ -235,6 +275,7 @@ sub _add_rule {
     my ($self, $rule, $href) = @_;
 
     $self->{RULES}->{$rule} = {};
+    $self->{RULES}->{$rule}->{word} = Lingua::Phonology::Word->new();
     for (keys %property) {
         $self->$_($rule, $href->{$_} || $property{$_});
     }
@@ -257,7 +298,7 @@ sub loadfile {
 
     my $parse;
     eval { $parse = _parse_from_file($file, 'rules') };
-    return err $@ if $@;
+    return err($@) if $@;
     $self->_load_from_struct($parse);
 }
 
@@ -278,6 +319,11 @@ sub _load_from_struct {
         if (exists $href->{content}) {
             # _parse_ling() returns where and do
 			($href->{where}, $href->{do}) = _parse_ling($href->{content});
+            unless ($href->{where} && $href->{do}) {
+                err "Couldn't parse linguistic rule '$href->{name}'";
+                $err = 1;
+                next RULE;
+            }
 		}
 
 		# Iterate over elements
@@ -327,63 +373,82 @@ sub _load_from_struct {
 sub _parse_ling {
 	my $str = shift;
 
-	require Lingua::Phonology::RuleParser;
-	my $p = Lingua::Phonology::RuleParser->new();
+    if (not $PARSER) {
+        require Lingua::Phonology::RuleParser;
+        $PARSER = Lingua::Phonology::RuleParser->new();
+    }
 
-	my $parse = $p->Rule($str);
-	return err("Couldn't parse $str") if not $parse;
+	my $parse = $PARSER->Rule($str);
+	return if not $parse;
+    return err "Unbalanced rule" unless @{$parse->{from}} == @{$parse->{to}};
 
-	# Build the strings based on the "from" and "to" properties
-	my (@do, @where);
-	my $offset = 0;
-	for my $i (sort keys %{$parse->{from}}) {
-        # The FROM item is not '0'--test/set something
-		if ($parse->{from}->{$i}) {
-			my $idx = $i - $offset;
-			push @where, _test_seg($idx, $parse->{from}->{$i});
-			push @do, _set_seg($idx, $parse->{to}->{$i});
+	my (@do, @where); # Holds the statements built
+	my $nulls = 0; # Counts the nulls encountered so far
+
+    # Iterate over $parse->{from}, adding elements to @where and @do
+	for my $i (0 .. $#{$parse->{from}}) {
+        # The FROM item is not '__NULL': we have a real seg and need to make a test statement
+		if ($parse->{from}[$i] ne '__NULL') {
+			my $idx = $i - $nulls;
+			push @where, _test_seg($idx, $parse->{from}[$i]);
+			push @do, _set_seg($idx, $parse->{to}[$i]);
 		}
-        # The FROM item is '0'--insert a segment
-		elsif (exists $parse->{from}->{$i}) {
-			push @do, _insert_seg($i - $offset, $parse->{to}->{$i});
-			$offset++;
+        # The FROM item is '__NULL'--insert a segment
+		elsif ($parse->{from}[$i] eq '__NULL') {
+			push @do, _insert_seg($i - $nulls, $parse->{to}[$i]);
+			$nulls++;
 		}
 	}
+
+    # Special case for when we ONLY have nulls in FROM and the next segment is
+    # a boundary. Normally this would generate a $_[0]->BOUNDARY statement, but
+    # that can never succeed, so we roll focus back one seg.
+    my $backstep = 0;
+    if ($nulls == @{$parse->{from}}) {
+        foreach (@{$parse->{when}}) {
+            if ($_->[1][0] eq '__BOUNDARY') {
+                # Redact the existing statements
+                foreach (@do) {
+                    s/\[(-?\d+)\]/\[$1 + 1\]/g;
+                }
+                $backstep = 1;
+                last;
+            }
+        }
+    }
 
 	# Build the strings based on the "when" property
-	my @cond;
+	my @conds;
 	for my $cond (@{$parse->{when}}) {
-		# One magnificent statement. Explanation: get the sorted, numeric keys
-		# from %$cond. For each slot get a truth-value test string from it; if
-		# it's more than zero, remember to decrease by offset. Join the test
-		# strings with &&'s, then wrap the whole thing in ()'s.
-		push @cond, 
-			'('. 
-				join (' && ', 
-					map { _test_seg(($_ < 0) ? $_ : $_ - $offset, $cond->{$_}) } sort keys %$cond
-				)
-			.')'
-		;
-	}
-	push @where, '(' . join(' || ', @cond) . ')' if @cond;
+        my @thiscond;
+        # The pre '_' segments are in [0], go through them backwards
+        for (my $i = -1; $i >= -@{$cond->[0]}; $i--) {
+            push @thiscond, _test_seg($i + $backstep, $cond->[0][$i]);
+        }
+        # The post '_' statements are in $cond->[1].
+        for my $i (0 .. $#{$cond->[1]}) {
+            my $idx = $i + $backstep + scalar @{$parse->{from}} - $nulls;
+            push @thiscond, _test_seg($idx, $cond->[1][$i]);
+        }
+        push @conds, '(' . join(' && ', @thiscond) . ')';
+    }
+	push @where, '(' . join(' || ', @conds) . ')' if @conds;
 
-	# Final joins - return (where, do)
-	return join("\n&&\n", @where), join("\n", @do);
+    # Final joins - return (where, do)
+    return join(" && ", @where), join("\n", @do);
 }
-	
+
 # Segs should be an array ref, a hash ref, '__BOUNDARY', or a string
 sub _test_seg {
-	my ($i, $seg) = @_;
-	if (ref $seg eq 'ARRAY') {
-		return '(' . join(' || ', map { _test_seg($i, $_) } @$seg) . ')';
-	}
-	elsif (ref $seg eq 'HASH') {
+    my ($i, $seg) = @_;
+    if (ref $seg eq 'ARRAY') {
+        return '(' . join(' || ', map { _test_seg($i, $_) } @$seg) . ')';
+    }
+    elsif (ref $seg eq 'HASH') {
         # Special case for empty hash - corresponds to "[]" in input, which we
-        # want to be always true, instead of compiling to (), which would
-        # always be false
-		if (not keys %$seg) {
-			return 1;
-		}
+        # want to be always true, instead of compiling to "()", which would be
+        # always false
+        return 1 if not keys %$seg;
 
 		# General case
 		return '(' . join(' && ', map { _test_feature($i, $_, $seg->{$_}) } keys %$seg) . ')';
@@ -397,22 +462,17 @@ sub _test_seg {
 	}
 }
 
+# Set seg cannot take an array ref, otherwise the same as _test_seg.
 sub _set_seg {
 	my ($i, $seg) = @_;
-	if (ref $seg eq 'ARRAY') {
-		return join ' || ', map { _set_seg($i, $_) } @$seg;
-	}
-	elsif (ref $seg eq 'HASH') {
+	if (ref $seg eq 'HASH') {
 		return join "\n", map { _set_feature($i, $_, $seg->{$_}) } keys %$seg;
 	}
-	elsif ($seg eq '__BOUNDARY') {
-		return err("Can't assign a segment to be a boundary");
-	}
-	elsif ($seg) {
-		return "Lingua::Phonology::Functions::change(\$_[$i], \"$seg\");\n";
+	elsif ($seg eq '__NULL') {
+		return "\$_[$i]->DELETE;\n";
 	}
 	else {
-		return "\$_[$i]->clear;\n";
+		return "Lingua::Phonology::Functions::change(\$_[$i], \"$seg\");\n";
 	}
 }
 
@@ -453,12 +513,15 @@ sub _set_feature {
 
 sub _insert_seg {
 	my ($i, $seg) = @_;
-	my $rv = "my \$new$i = \$_[0]->new;\n";
-    # A hack--do a normal _set_seg w/ '~' placeholder and then s/// the result
+    # Make an unlikely-to-repeat variable name
+    my $var = sprintf "\$new%06d", rand(1_000_000); 
+    # Take the new segment from $_[+0], which won't be touched by backstepping
+	my $rv = "my $var = \$_[+0]->new;\n"; 
+    # Do a normal _set_seg w/ '~' placeholder and then s/// the result
 	$rv .= _set_seg('~', $seg);
-	$rv =~ s/_\[~\]/new$i/g;
+	$rv =~ s/\$_\[~\]/$var/g;
 	
-	$rv .= "\$_[$i]->INSERT_LEFT(\$new$i);\n";
+	$rv .= "\$_[$i]->INSERT_LEFT($var);\n";
 	return $rv;
 }
 
@@ -476,12 +539,12 @@ sub _to_str {
 	for my $rule (keys %{$self->{RULES}}) {
         # Add our name
 		for (@text) {
-			$href->{rule}->{$rule}->{$_} = { value => $self->{RULES}->{$rule}->{$_} };
+			$href->{rule}->{$rule}->{$_} = { value => $self->$_($rule) }
+                if defined $self->$_($rule);
 		}
 		for (@code) {
-			next if not exists $self->{RULES}->{$rule}->{$_};
-
-            my $str = _deparse_ext $self->{RULES}->{$rule}->{$_}, $dpar or err $@;
+			next if not defined $self->$_($rule);
+            my $str = _deparse_ext $self->$_($rule), $dpar or err($@);
 			$href->{rule}->{$rule}->{$_} = [ $str . '    ' ]; # Extra whitespace to help alignment
 		}
 	}
@@ -497,172 +560,46 @@ sub apply {
 	my ($self, $rule, $orig) = @_;
 
 	return err("No such rule '$rule'") unless exists $self->{RULES}->{$rule};
+    return err "Argument not an array reference" unless _is $orig, 'ARRAY';
 
-	# Check type of input
-	return err("Argument to apply() must be an array reference") unless _is($orig, 'ARRAY');
-	return undef if not @$orig;
-	
-	# Check that we have good segments and bless into the Rules subclass
-    my @rule_segs;
-    for (@$orig) {
-        my $add = Lingua::Phonology::Segment::Rules->new($_);
-        return err "Element in array reference not a segment" if not $add;
-        push @rule_segs, $add;
-        $add->_RULE($self->{RULES}->{$rule});
-    }
+    # Get the word
+    my ($word, $where, $do, $result) 
+        = @{$self->{RULES}->{$rule}}{('word', 'where', 'do', 'result')};
+
+    # Attempt to set this to the word
+    $word->set_segs(@$orig) || return err($@);
+    $word->rule({ map { $_ => $self->$_($rule) } keys %property });
 	
 	# Reset the counter
 	$self->{COUNT} = 0;
 
-	# We do the following for EACH domain
-	foreach (_make_domain($self->domain($rule), @rule_segs)) {
-		# Readability
-		my @word = @$_;
+    # Iterate over the segments
+    while ($word->next) {
+        my @word = $word->get_working_segs;
+        if ($where->(@word)) {
+            # If we're using result
+            if ($result) {
+                whatif {
+                    $do->(@word);
+                    die if not $result->($word->get_working_segs);
+                    $self->{COUNT}++;
+                };
+            }
 
-		# Make tiers, if needed
-		if (my $tier = $self->tier($rule)) {
-			@word = _make_tier($tier, @word);
-		}
+            # Normal case
+            else {
+                # Apply the rule
+                $do->(@word);
+                $self->{COUNT}++;
+            }
+        } 
+    }
 
-		# Create boundary segments - BEFORE filtering, since a filter might refer to boundaries
-		push (@word, $BOUNDARY);
-		unshift (@word, $BOUNDARY);
-
-        # Create filters
-		if (my $filter = $self->filter($rule)) {
-            @word = _make_filter($filter, @word);
-        }
-
-		# Rotate to starting positions
-		my $next;
-		if ($self->direction($rule) eq 'leftward') {
-			@word = _leftward(@word); # We need one extra rotation for leftward
-			$next = \&_leftward;
-		} 
-		else {
-			$next = \&_rightward;
-		} 
-		@word = $next->(@word);
-			
-		# Iterate over each segment for where and do
-        my $where = $self->where($rule) || $property{where};
-        my $do = $self->do($rule) || $property{do};
-        my $result = $self->result($rule);
-		while (not $word[0]->BOUNDARY) {
-			if ($where->(@word)) {
-
-				# If we're using result
-				if ($result) {
-					whatif {
-						$do->(@word);
-						die if not $result->(_cleanup(@word));
-						$self->{COUNT}++;
-					};
-				}
-
-                # Normal case
-				else {
-					# Apply the rule
-					$do->(@word);
-					$self->{COUNT}++;
-				}
-			} 
-
-			# Rotate to the next segment
-			@word = &$next(@word);
-		} 
-	} 
-
-	# Clean up the word - @rule_segs retains segments in original order
-	@$orig = grep { defined($_) && $_->all_values }
-			 map { $_->INSERT_LEFT, shift(@$orig), $_->INSERT_RIGHT }
-			 @rule_segs;
+	@$orig = $word->get_orig_segs;
+    $word->clear; # Free up memory
 		
 	return @$orig;
 }
-
-# Return only list elements that have some values set and include
-# INSERT_LEFT and INSERT_RIGHT segments
-sub _cleanup {
-	return grep { defined($_) && $_->all_values }
-           map { ($_->INSERT_LEFT, $_, $_->INSERT_RIGHT) }
-           @_;
-}
-
-# A quick func to flatten hashrefs into easily comparable strings
-sub _flatten {
-    my ($ref, $seen) = @_;
-    return '' if not defined $ref;
-    $seen = {} if not $seen;
-    if (ref $ref) {
-        return $ref if exists $seen->{$ref};
-        $seen->{$ref} = undef;
-    }
-
-    if (_is $ref, 'ARRAY' ) {
-        return join '', map { _flatten($_, $seen) } @$ref;
-    }
-    if (_is($ref, 'HASH')) {
-        return join '', map { $_, _flatten($ref->{$_}, $seen) } sort keys %$ref;
-    }
-    return $ref;
-} 
-
-# Make a domain
-sub _make_domain ($@) {
-	my $domain = shift;
-	return (\@_) if not $domain;
-	my @return = ();
-
-	my $i = 0;
-	while ($i < scalar(@_)) {
-		my @domain = ($_[$i]);
-
-		# Keep adding segments as long as they have the same reference for $domain
-        no warnings 'uninitialized';
-		while ($_[$i+1] && _flatten([$_[$i]->value_ref($domain)]) eq _flatten([$_[$i+1]->value_ref($domain)])) {
-			$i++;
-			push (@domain, $_[$i]);
-		} #end while
-
-		push (@return, \@domain);
-		$i++;
-	} 
-
-	return @return;
-}
-
-# Make tiers
-sub _make_tier ($@) {
-	my $tier = shift;
-
-	return map { Lingua::Phonology::Segment::Tier->new(@$_) }
-           _make_domain $tier, grep { defined $_->value($tier) }
-           @_;
-}
-
-# Make filters
-sub _make_filter ($@) {
-	my $filter = shift;
-
-	my @return = ();
-	for (0 .. scalar @_) {
-		push (@return, $_[0]) if $filter->(@_) || $_[0]->BOUNDARY;
-		@_ = _rightward(@_);
-	}
-	return @return;
-}
-
-# Readably do the rotations
-sub _rightward {
-	push(@_, shift(@_));
-	return @_;
-} 
-
-sub _leftward {
-	unshift(@_, pop(@_));
-	return @_;
-} 
 
 # Makes rules appliable by their name
 our $AUTOLOAD;
@@ -683,7 +620,7 @@ sub AUTOLOAD {
 		# Go to the rule
 		return $self->$method(@_);
 	} 
-    die "No such method: $AUTOLOAD";
+    die "No such method: $AUTOLOAD, called";
 } 
 
 sub DESTROY {
@@ -748,21 +685,37 @@ arguments.
 =head2 add_rule
 
 Adds one or more rules to the list. Takes a series of key-value pairs, where
-the keys are the names of rules to be added, and the values are hashrefs. Any of the parameters mentioned above may be used, so a single rule has the following maximal structure:
+the keys are the names of rules to be added, and the values are hashrefs. Any
+of the parameters mentioned above may be used, so a single rule has the
+following maximal structure:
 
 	'Name of Rule' => {
-		domain => 'some_feature',
-		tier => 'some_feature',
+		domain    => 'some_feature',
+		tier      => 'some_other_feature',
 		direction => 'rightward', # Can only be 'rightward' or 'leftward'
-		where => \&foo,
-		do => \&bar,
-		result => \&baz
+        filter    => \&filter,
+		where     => \&where,
+		do        => \&do_this,
+		result    => \&result
 	}
 
-A detailed explanation of how to use these to make useful rules is in L<WRITING
-RULES>. A typical call to add_rule might look like what follows. Assume that
-'nasal' and 'SYLL' are defined in the feature set you're using, and that
-nasalized() and denasalize() are subroutines defined elsewhere.
+If you are using a linguistic rule, then the C<where> and C<do> keys are
+unnecessary and should not be used. In that case, the rule has the following
+maximal structure:
+
+    'Linguistic Rule' => {
+        domain     => 'some_feature',
+        tier       => 'some_other_feature',
+        direction  => 'rightward',
+        filter     => \&filter,
+        linguistic => '[foo] => [bar] / [baz]',
+        result     => \&result
+    }
+
+A detailed explanation of how to use these to make useful rules is in
+L<"WRITING RULES">. A typical call to add_rule might look like what follows.
+Assume that 'nasal' and 'SYLL' are defined in the feature set you're using, and
+that nasalized() and denasalize() are subroutines defined elsewhere.
 
 	$rules->add_rule(
 		Denasalization => {
@@ -814,7 +767,7 @@ Loads rule definitions from a file. Returns true on success, false on failure.
 This feature is new as of v0.3, and comes with new capability for reading rules
 in a readable linguistic format. This is far too complex to describe here:
 please consult L<Lingua::Phonology::FileFormatPOD> for details.
-/
+
 =head2 clear
 
     $rules->clear;
@@ -858,7 +811,7 @@ argument. For example:
 	$rules->tier('Rule', 'feature');	# Sets the tier to 'feature'
 	$rules->domain('Rule');				# Returns the domain
 	$rules->domain('Rule', 'feature');	# Sets the domain to 'feature'
-	# Etc., etc.
+    # Etc.
 
 =head2 apply
 
@@ -950,7 +903,7 @@ when they are returned. Calling this:
 
 actually returns this:
 
-    ([1], [2], [3]);
+    ([1], [2], [3])
 
 =head2 persist
 
@@ -1025,11 +978,19 @@ Criterion checking and execution are done for every segment. According to the
 order given above, C<where> and C<do> are almost the last things to be
 executed, but they're the most fundamental, so we'll examine them first.
 
+=head2 Using linguistic rules
+
+The linguistic rule format is a powerful way to write out phonological
+processes that is often easier to write and understand than using pure Perl.
+This format is described in L<Lingua::Phonology::FileFormatPOD/"LINGUISTIC-STYLE
+RULES">.  When you include a linguistic rule, it replaces the C<where> and
+C<do> properties, but the other properties may still exist.
+
 =head2 Using 'where' and 'do'
 
-Of course, the actual criteria and execution are done by the coderefs that
-you supply. So you have to know how to write reasonable criteria and
-actions.
+If you are not using a linguistic rule, the actual criteria and execution are
+done by the coderefs that you supply. So you have to know how to write
+reasonable criteria and actions.
 
 Lingua::Phonology::Rules will pass an array of segments to both of the coderefs
 that you give it. This array of segments will be arranged so that the segment
@@ -1058,15 +1019,15 @@ This makes it easy and intuitive to refer to things like 'current segment'
 and 'preceding segment'. The current segment is $_[0], the preceding one is
 $_[-1], the following segment is $_[1], etc.
 
-Yes, it's true that if the focus is on the first segment of the word, $_[-3]
-refers to the last segment of the word. So be careful. Besides, you should
-rarely, if ever, need to refer to something that far away. If you think you do,
-then you're probably better off using a tier or filter.
+It's true that if the focus is on the first segment of the word, $_[-3] refers
+to the last segment of the word. So be careful. Besides, you should rarely, if
+ever, need to refer to something that far away. If you think you do, then
+you're probably better off using a tier or filter.
 
-Also, you should know that the boundary segments themselves are impervious to
-any attempt to alter or delete them. However, there is nothing that prevents
-you from setting some I<other> segment to be a boundary, which will do very
-strange and probably undesirable things. Don't say I didn't warn you.
+Boundary segments themselves are impervious to any attempt to alter or delete
+them. However, there is nothing that prevents you from setting some I<other>
+segment to be a boundary, which will do very strange and probably undesirable
+things. Don't say I didn't warn you.
 
 Using our same example, then, we could write a rule that devoices final
 consonants very easily.
@@ -1077,7 +1038,7 @@ consonants very easily.
 	$rules->add_rule(FinalDevoicing => { where => $final,
 	                                     do    => $devoice });
 	
-	@word = ($b, $a, $n, $d);
+	@word = $symbols->segment('b', 'a', 'n', 'd');
 	$rules->FinalDevoicing(\@word);
 	print $symbols->spell(@word); # Prints 'bant'
 
@@ -1087,14 +1048,9 @@ actually affect changes. We have no way of enforcing this, however.
 
 Note that, since the code in 'where' and 'do' simply operates on a local subset
 of the segments that you provided as the word, doing something like
-C<delete($_[0])> doesn't really have any effect. Yes, the local reference to
-the segment at $_[0] is deleted, but the segment still exists outside of the
-subroutine. Instead, write C<< $_[0]->clear >>, which removes all feature
-settings from the segment. Lingua::Phonology::Rules will later clear out any
-segments that have no features on them for you.
-
-As a corollary, if you give segments that have no feature values set as
-input, they will be silently dropped from the output.
+C<delete($_[0])> doesn't have any effect. Neither does adding segments to @_ do
+anything. To properly perform insertion and deletion, see L<"Writing insertion
+and deletion rules"> below.
 
 =head2 Using domains
 
@@ -1110,7 +1066,8 @@ complete words with their own boundaries. For example:
 	@word = $symbols->segment('b','a','r','d','a','m');
 
     # We make two groups of segments whose SYLLABLE features are all references
-    # to the same value
+    # to the same value. Note that something very much like this is done
+    # automatically with the Lingua::Phonology::Syllable module.
     #
     # Syllable 1
 	$word[0]->SYLLABLE(1);
@@ -1122,25 +1079,22 @@ complete words with their own boundaries. For example:
 	$word[4]->SYLLABLE($word[3]->value_ref('SYLLABLE'));
 	$word[5]->SYLLABLE($word[3]->value_ref('SYLLABLE'));
 
-	# The preceding can be done a lot easier with the Syllable module.
-
-	# Now we make a rule to drop the last consonant in any syllable
+    # Now we make a rule to drop the last consonant in any syllable
 	$rules->add_rule(
 		'Drop Final C' => {
 			domain => 'SYLLABLE',
 		    where => sub { $_[1]->BOUNDARY },
-			do => sub { $_[0]->clear }
+			do => sub { $_[0]->DELETE }
 		}
 	);
 	
 	$rules->apply('Drop Final C', \@word);
-	# Now both the /r/ and the /m/ are marked as codas
+    print $symbols->spell(@word); # Prints 'bada'
 
 In this example, if we hadn't specified the domain 'SYLLABLE', only the /m/
-would have been marked as a coda, because only the /m/ would have been at a
-boundary. With the SYLLABLE domain, however, the input word is broken up
-into the two syllables, which act as their own words with respect to
-boundaries.
+would have been deleted, because only the /m/ would have been at a boundary.
+With the SYLLABLE domain, however, the input word is broken up into the two
+syllables, which act as their own words with respect to boundaries.
 
 =head2 Using tiers
 
@@ -1167,20 +1121,20 @@ that the rule works on. For example:
 Note that if we were doing this without tiers, we would have to specify $_[5]
 to see the final /i/ from the /u/. No such nonsense is necessary when using the
 'vocoid' tier, because the only segments that the rule "sees" are ('u','i').
-Thus, the following rule spreads frontness backwards (though I<why> it does so
-may not be obvious to non-linguists).
+Thus, the following rule spreads frontness from right to left.
 	
 	# Make the rule, being sure to specify the tier
 	$rules->add_rule(
 		VowelHarmony => {
 			tier => 'vocoid',
-	        direction => 'rightward',
+	        direction => 'leftward',
+            
             # We specify that the last vowel in a word should never change
 			where => sub { not $_[1]->BOUNDARY },
 
             # All vowels before the last copy the front/backness of the vowel
-            # after them (front/back position is dominated by the 'Lingual'
-            # node, so we just copy the whole node).
+            # after them. Front/back position is dominated by the 'Lingual'
+            # node, so we just copy the whole node.
 			do => sub { $_[0]->Lingual( $_[1]->value_ref('Lingual') ) }
 		}
 	);
@@ -1277,62 +1231,98 @@ segments in the word from the coderef. Segments added or deleted in @_ will
 disappear once the subroutine exits. Lingua::Phonology::Rules provides a
 workaround for both of these cases.
 
-Deletion can be accomplished by setting a segment to have no features set.
-This is easily done with the clear() method for Segment objects. When the
-coderef for C<where> or C<do> exits, any segments with no values will be
-automatically deleted. A rule deleting coda consonants can be written thus:
+Deletion is accomplished by calling the special method C<DELETE()> on the
+segment to be deleted.  A rule deleting coda consonants can be written thus:
 
 	# Assume that we have already assigned coda consonants to have the
 	# feature 'coda'
 	$rules->add_rule(
 		DeleteCodaC => {
 			where => sub { $_[0]->coda },
-	        do => sub { $_[0]->clear }
+	        do => sub { $_[0]->DELETE }
 		}
 	);
 
-As a side effect of this, if you provide input segments that have no
-features set, they will be silently deleted from output.
+In previous versions of Lingua::Phonology::Rules, deletion was accomplished by
+calling C<clear()> on the segment. This still works--if you call C<clear()>,
+your segment will also be deleted from output. However, using C<DELETE> has an
+advantage over using C<clear()>, namely that if you call clear() on a segment,
+any other copies of the segment will also have their features cleared. When you
+call DELETE, only the copy of the segment in the rule is dropped, while other
+copies of the segment are unaffected.
 
 Insertion can be accomplished using the special methods INSERT_RIGHT() and
 INSERT_LEFT() on a segment. The argument to INSERT_RIGHT() or INSERT_LEFT()
 must be a Lingua::Phonology::Segment object, which will be added to the right
 or the left of the segment on which the method is called. For example, the
 following rule inserts a schwa to the left of a segment that is unsyllabified
-(does not have its SYLLABLE feature set):
+(does not have its SYLL feature set):
 
 	$rules->add_rule(
 		Epenthesize => {
-			where => sub { not $_[0]->SYLLABLE },
+			where => sub { not $_[0]->SYLL },
 	        do => { $_[0]->INSERT_LEFT($symbols->segment('@')) }
 		}
 	);
 
-Note that the methods INSERT_RIGHT() and INSERT_LEFT() don't exist except
-inside the code reference for a rule.
+Note that the methods DELETE(), INSERT_RIGHT() and INSERT_LEFT() don't exist
+except during the application of a rule.
 
-That the segments you insert or delete don't immediately (dis)appear.  Instead,
-they wait in segmental limbo until iteration over the current word is complete,
-and then are inserted/deleted all at once. Exception: when a C<result> is
-specified, segment deletion/insertion occurs right before the result code is
-evaluated. This is done purely to accomodate the most likely usage of
-C<result>: deleting a value and then checking that resulting consonants
-clusters are still valid.
+When the segments you insert or delete (dis)appear depends on the settings for
+the rule. When a domain is in effect, segments are not added into the working
+copy of the word until the current rule exists. In all other situations, the
+segments appear/disappear "immediately". "Immediately" means "as soon as the
+current iteration of the rule finishes." For example, consider these rules:
+
+    $rules->add_rule(
+        Instant => {
+            where => sub { $_[0]->spell eq 's' },
+            do => sub { $_[0]->INSERT_RIGHT($symbols->segment('i')) }
+        }
+        Delayed => {
+            where => sub { $_[0]->spell eq 's' },
+            do => sub { $_[0]->INSERT_RIGHT($symbols->segment('i')) },
+            domain => 'SYLL'
+        }
+    );
+
+    @word = $symbols->segment(split //, 'kasta');
+
+When the rule 'Instant" is applied to C<@word>, the 'i' which is inserted
+appears as soon as the code reference that inserts the 'i' finishes. After
+focus moves off of the 's', it moves onto the 'i' which was inserted. When the
+rule 'Delayed' is applied, however, the 'i' does not appear immediately because
+a domain exists for the rule, and focus moves from the 's' onto the 't'. The
+inserted 'i' does not appear until the whole rule finishes.
+
+This behavior is necessary for several reasons. It is generally desirable to
+have segments appear as soon as possible. However, when a domain is in effect
+the calculation time for rebuilding the domains is prohibitive.  Additionally,
+the insertion of a segment can move domain boundaries and have bizarre and
+unpredictable effects. For these reasons, segment insertion/deletion is delayed
+when domains are used. 
+
+You CANNOT insert or delete segments when a tier is in effect. Such rules are
+usually nonsensical, since a tier encapsulates several segments, and it's
+impossible to know how or where to insert a new segment. If you attempt to call
+INSERT_RIGHT, INSERT_LEFT, or DELETE while a tier is in effect, you will get a
+warning and the call will be ignored.
+
+Much of this behavior is new as of v0.32. Earlier verions were not nearly as
+consistent or predictable with respect to insertion or deletion.
 
 =head2 Developer goodies
 
-Theres a couple of things here that are probably of no use to the average
-user, but have come in handywhen developing code for other modules or
-scripts to use. And who knows, you may have a use for them.
+There are a couple of things here that are probably of no use to the average
+user, but have come in handy when developing code for other modules or scripts
+to use. And who knows, you may have a use for them.
 
-All segments have the property C<_RULE> during the execution of a
-rule. This method returns a hash reference that has keys corresponding to
-the properties of the currently executing rule. These properties include
-C<do, where, domain, tier, direction>, etc. If for some reason you need to
-know or change one of these during the execution of a rule, you can use
-this to do so. Note that altering the hash reference will alter the actual
-properties of the current rule--although you won't notice it until the next
-time the rule is executed.
+All segments have the property C<_RULE> during the execution of a rule. This
+method returns a hash reference that has keys corresponding to the properties
+of the currently executing rule. These properties include C<do, where, domain,
+tier, direction>, etc. If for some reason you need to know one of these during
+the execution of a rule, you can use this to do so. Note that altering the hash
+reference will NOT alter the actual properties of the current rule.
 
 Here's a silly example:
 
@@ -1340,7 +1330,6 @@ Here's a silly example:
 		print $_[0]->_RULE->{direction}, "\n";
 	}
 
-	# Assume that we have $rules and @word lying around
 	$rules->add_rule(
 		PrintLeft => {
 			direction => 'leftward',
@@ -1354,10 +1343,14 @@ Here's a silly example:
 	$rules->PrintLeft(\@word);    # Prints 'leftward' several times
 	$rules->PrintRight(\@word);   # Prints 'rightward' several times
 
-=head1 TO DO
+=head1 BUGS
 
-The handling of insertion and deletion is very ad-hoc. Better suggestions are
-welcome.
+When you call C<clear()> during the execution of a rule, the segment is deleted
+even if you restore some feature values to it immediately afterwards.
+
+There are no diagnostics for finding syntax errors in linguistic rules.
+
+The documentation is confusing and poorly written.
 
 =head1 AUTHOR
 

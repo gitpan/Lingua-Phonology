@@ -189,13 +189,11 @@ $phono->symbols->drop_symbol('j','w');
         tiers => {
             tier => 'vocoid',
             direction => 'rightward',
-            do => sub { push @segs, $_[0]; $_[0]->TIER(1); }
+            do => sub { push @segs, $_[0]->{seg}; $_[0]->TIER(1); }
         }
     );
     my @expected_segs = 
-        map { $_->_RULE($rules->{RULES}->{tiers}); $_ }
         map { Lingua::Phonology::Segment::Tier->new(@$_) } 
-        map { [ map { Lingua::Phonology::Segment::Rules->new($_) } @$_ ] }
         ([$word[0]], [@word[2,3]], [@word[6,7,9]]);
 
     ok $rules->tiers(\@word), 'tiers: apply tier rule';

@@ -96,27 +96,46 @@ my $rules = $phono->rules;
 
 # delete segments
 {
-    ok(delete_seg($word[6]), 'test delete_seg()');
-    my %vals = $word[6]->all_values;
-    is(keys %vals, 0, 'test result of delete_seg()');
+    $rules->add_rule(
+        del => {
+            where => sub {$_[1]->BOUNDARY},
+            do => sub { ok delete_seg($_[0]), 'test delete_seg()'; }
+        }
+    );
+    my @word = $phono->symbols->segment(split //, 'kad');
+
+    $rules->del(\@word);
+    is($phono->symbols->spell(@word), 'ka', 'test result of delete_seg()');
     ok((not delete_seg($notseg)), 'test failure of delete_seg() on non-segment');
 }
 
 # insert before
 {
-    my $tester = Lingua::Phonology::Segment::Rules->new($word[1]);
+    $rules->add_rule(
+        lefter => {
+            where => sub { $_[0]->spell eq 'd' },
+            do => sub { ok insert_before($_[0], $phono->symbols->segment('@')), 'test insert_before()'; }
+        }
+    );
+    my @word = $phono->symbols->segment('d');
 
-    ok insert_before($tester, $phono->symbols->segment('@')), 'test insert_before()';
-    is $tester->INSERT_LEFT->spell, '@', 'test result of insert_before()';
+    $rules->lefter(\@word);
+    is $phono->symbols->spell(@word), '@d', 'test result of insert_before()';
     ok((not insert_before($notseg, $phono->symbols->segment('@'))), 'test failure of insert_before() on non-segment');
 }
 
 # insert after
 {
-    my $tester = Lingua::Phonology::Segment::Rules->new($word[1]);
+    $rules->add_rule(
+        righter => {
+            where => sub { $_[0]->spell eq 'd' },
+            do => sub { ok insert_after($_[0], $phono->symbols->segment('@')), 'test insert_before()'; }
+        }
+    );
+    my @word = $phono->symbols->segment('d');
 
-    ok insert_after($tester, $word[4]->duplicate), 'test insert_after()';
-    is $tester->INSERT_RIGHT->spell, $word[4]->spell, 'test result of insert_after()';
-    ok((not insert_after($notseg, $word[4]->duplicate)), 'test failure of insert_after() on non-segment');
+    $rules->righter(\@word);
+    is $phono->symbols->spell(@word), 'd@', 'test result of insert_before()';
+    ok((not insert_after($notseg, $word[0]->duplicate)), 'test failure of insert_after() on non-segment');
 }
 

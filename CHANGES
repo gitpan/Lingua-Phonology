@@ -1,4 +1,12 @@
 =============================
+Changes from v0.3 to 0.32
+* Added ability to load linguistic rules with add_rule
+* Added Word.pm to make rules more robust
+* Made the linguistic rule grammar stricter
+* Added more tests
+* Fixed documentation bugs
+
+=============================
 Changes from v0.25 to 0.3
 * Added loadfile() methods to all major classes with XML support
 * Added Common.pm
@@ -11,11 +19,7 @@ Changes from v0.25 to 0.3
 =============================
 Changes from v0.2 to v0.25
 
-This was a bug-fix update from 0.2, but the bug-fix proved to be fairly major,
-so I warranted giving it a half-step increment in version number.
-
-* Resolved conflicts between Syllable.pm and Rules.pm
-* Added RuleSegment.pm
+* Resolved conflicts between Syllable.pm and Rules.pm Added RuleSegment.pm
 * Added two minor methods to the Syllable class
 
 =============================

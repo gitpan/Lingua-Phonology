@@ -66,7 +66,7 @@ use Lingua::Phonology::Segment;
 
 our $VERSION = 0.3;
 
-sub err ($) { warnings::warnif(shift); return; }
+sub err ($) { _err($_[0]) if warnings::enabled() };
 
 # Make subs for our flags
 # flags in sub_name => 'hash_key' format

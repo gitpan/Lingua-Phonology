@@ -64,7 +64,7 @@ use Lingua::Phonology::Functions qw/adjoin flat_adjoin/;
 
 our $VERSION = 0.3;
 
-sub err ($) { warnings::warnif(shift); return; }
+sub err ($) { _err($_[0]) if warnings::enabled() };
 
 # Build accessors for our properties. Hashes in name => default format
 our %bool = ( 

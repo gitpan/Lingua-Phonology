@@ -49,7 +49,7 @@ our %EXPORT_TAGS = (all => \@EXPORT_OK);
 
 our $VERSION = 0.21;
 
-sub err ($) { warnings::warnif(shift); return; }
+sub err ($) { _err($_[0]) if warnings::enabled() };
 
 # Join two segments for a feature
 sub assimilate {
@@ -99,7 +99,7 @@ sub dissimilate {
 sub change {
 	my ($seg, $sym) = @_;
 	return unless _is_seg $seg;
-	$seg->clear;
+	$seg->delink($_) for keys %{$seg->all_values};
 	my %new_vals = $seg->symbolset->prototype($sym)->all_values;
 	$seg->$_($new_vals{$_}) for (keys %new_vals);
 	return 1;

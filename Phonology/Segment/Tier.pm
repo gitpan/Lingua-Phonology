@@ -4,11 +4,12 @@ package Lingua::Phonology::Segment::Tier;
 
 use strict;
 use warnings;
+use warnings::register;
 use Lingua::Phonology::Common;
 
 our $VERSION = 0.11;
 
-sub err ($) { warnings::warnif(shift); return; }
+sub err ($) { _err($_[0]) if warnings::enabled() };
 
 sub new {
 	my $proto = shift;
