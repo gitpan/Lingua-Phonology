@@ -42,7 +42,7 @@ indicating a neat, human-comprehensible phonetic symbol. A
 I<prototype> is a Segment object, preferably a minimally defined segment 
 that will match only those segments you want it to.
 
-Be sure to read the L<"spell"> section, which describes the algorithm used 
+Be sure to read the L<spell> section, which describes the algorithm used 
 to score potential matches. If you're not getting the results you expect,
 you probably need to examine the way your prototype definitions are 
 interacting with that algorithm.
@@ -55,6 +55,8 @@ use warnings::register;
 use Carp;
 use Lingua::Phonology::Segment;
 use Lingua::Phonology::Default;
+
+our $VERSION = 0.11;
 
 =head1 METHODS
 
@@ -76,8 +78,10 @@ sub new {
 				 SYMBOLS => {} };
 
 	my $features = shift;
-	return carp "No feature set given" if not $features;
-	return carp "Bad feature set given" if not (UNIVERSAL::isa($features, 'Lingua::Phonology::Features'));
+	if ((not $features) or (not UNIVERSAL::isa($features, 'Lingua::Phonology::Features'))) {
+		carp "No feature set or bad featureset given for new Symbols object";
+		return undef;
+	}
 	$self->{FEATURES} = $features;
 
 	bless ($self, $class);
@@ -86,38 +90,45 @@ sub new {
 
 =head2 symbol
 
-Adds one or more symbols to the current object. The argument to symbol
-must be a hashref. The keys of this hashref are the text symbols that 
-will be returned, and the values should be Segment objects that act as the
-prototypes for each symbol. See L<"spell"> for explanation of
-how these symbols and protoypes are used.
+Adds one or more symbols to the current object. The argument to symbol must be
+a hash. The keys of this hash are the text symbols that will be returned, and
+the values should be Segment objects that act as the prototypes for each
+symbol. See L<"spell"> for explanation of how these symbols and protoypes are
+used.
 
 If you attempt to pass in a Segment object associated with a feature set
 other than the one defined for the current object, symbol() will skip to
-the next symbol (and emit a warning, if warnings are turned on).
+the next symbol and emit a warning, if warnings are turned on.
+
+This method returns true if all of the attempted symbol additions succeeded,
+and false otherwise.
 
 =cut
 
 sub symbol {
 	my $self = shift;
-	my $hashref = shift;
+	my %hash = @_;
 
-	SYMBOL: for my $symbol (keys(%$hashref)) {
+	my $return = 1;
+	SYMBOL: for my $symbol (keys %hash) {
 		# Carp if you're not given a segment
-		unless (UNIVERSAL::isa($hashref->{$symbol}, 'Lingua::Phonology::Segment')) {
+		unless (UNIVERSAL::isa($hash{$symbol}, 'Lingua::Phonology::Segment')) {
 			err("Improper symbol prototype for '$symbol'");
+			$return = 0;
 			next SYMBOL;
 		} # end unless
 
 		# Check that the segment is also associated with the right feature set
-		if ($self->features != $hashref->{$symbol}->featureset) {
+		if ($self->features ne $hash{$symbol}->featureset) {
 			err("Prototype for '$symbol' has wrong feature set");
+			$return = 0;
 			next SYMBOL;
 		} # end if
 
 		# Otherwise, there's not much to do
-		$self->{SYMBOLS}->{$symbol} = $hashref->{$symbol};
+		$self->{SYMBOLS}->{$symbol} = $hash{$symbol};
 	} # end SYMBOL
+	return $return;
 } # end symbol
 
 =head2 drop_symbol
@@ -129,7 +140,8 @@ delete a symbol which doesn't currently exist.
 
 sub drop_symbol {
 	my $self = shift;
-	delete ($self->{SYMBOLS}->{ shift });
+	my $sym = shift;
+	delete ($self->{SYMBOLS}->{$sym});
 } # end sub
 
 =head2 change_symbol
@@ -141,21 +153,26 @@ up an error.
 The method symbol() can also be used to redefine existing symbols; this 
 method is provided only to aid readability.
 
+As with symbol(), this method returns true if all of the attempted changes
+succeeded, otherwise false.
+
 =cut
 
 sub change_symbol {
 	my $self = shift;
-	my $hashref = shift;
+	my %hash = @_;
 
-	SYMBOL: for my $symbol (keys(%$hashref)) {
-		if (not $self->symbol_list($symbol)) {
-			err("No symbol '$symbol'");
+	my $return = 1;
+	SYMBOL: for my $symbol (keys(%hash)) {
+		if (not $self->prototype($symbol)) {
+			$return = 0;
 			next SYMBOL;
 		} # end if
 
 		# Pass on to symbol
-		$self->symbol({$symbol => $hashref->{$symbol}});
+		$return = $self->symbol($symbol => $hash{$symbol});
 	} # end SYMBOL
+	return $return;
 } # end change_symbol
 
 =head2 loadfile
@@ -234,11 +251,13 @@ sub loadfile {
 	my $self = shift;
 	my $file = shift;
 
+	no strict 'refs';
 	if ($file) {
-		open $file, $file or return carp "Couldn't open $file: $!";
+		open $file, $file or return err("Couldn't open $file: $!");
 	}
 	else {
-		$file = open_default('symbols');
+		$file = Lingua::Phonology::Default::open('symbols');
+		# $file = __DATA__;
 	}
 	
 	while (<$file>) {
@@ -297,21 +316,20 @@ Comparison segments may always be more defined than the prototypes, so
 there is no consequence if the comparison segment is defined for features
 that the prototype isn't defined for.
 
-The 'winning' prototype is the one that scores the highest by the 
-preceding algorithm. If more than one prototype scores the same, it's 
-unpredictable which symbol will be returned, since it will depend on the
-order in which they prototypes came out of the internal hash.
+The 'winning' prototype is the one that scores the highest by the preceding
+algorithm. If more than one prototype scores the same, it's unpredictable which
+symbol will be returned, since it will depend on the order in which the
+prototypes came out of the internal hash.
 
-If no prototype scores at least 1 point by this algorithm, the string
-'_?_' will be returned. This indicates that no suitable matches were 
-found.
+If no prototype scores at least 1 point by this algorithm, the string '_?_'
+will be returned. This indicates that no suitable matches were found.
 
-Beware of testing a Segment object that is associated with a different 
-feature set than the ones used by the prototypes. This will almost 
-certainly cause errors and bizarre results.
+Beware of testing a Segment object that is associated with a different feature
+set than the ones used by the prototypes. This will almost certainly cause
+errors and bizarre results.
 
-Note that spell() is fairly expensive, and is by far the most costly
-routine in the Lingua::Phonology package.
+Note that spell() is fairly expensive, and is by far the most costly routine in
+the Lingua::Phonology package.
 
 =cut
 
@@ -330,14 +348,13 @@ sub spell {
 	
 =head2 score
 
-Takes a Segment argument and compares it against the defined symbols, just
-like symbol(). It normally returns a hash with the available symbols as 
-the keys and the score for each symbol as the value. In a scalar context,
-returns the winning symbol just like spell(). Useful for debugging
-and determining why the program thinks that [a] is better described as 
-[d] (as happened to the author during testing). Unfortunately, score() can
-only be used to test one segment at a time, rather than a list of 
-segments.
+Takes a Segment argument and compares it against the defined symbols, just like
+symbol(). It normally returns a hash with the available symbols as the keys and
+the score for each symbol as the value. In a scalar context, returns the
+winning symbol just like spell(). Useful for debugging and determining why the
+program thinks that [a] is better described as [d] (as happened to the author
+during testing). Unfortunately, score() can only be used to test one segment at
+a time, rather than a list of segments.
 
 =cut
 
@@ -387,7 +404,7 @@ sub prototype {
 	my $symbol = shift;
 
 	my $proto = $self->{SYMBOLS}->{$symbol};
-	return carp "No such symbol '$symbol'" if not $proto;
+	return err("No such symbol '$symbol'") if (not $proto);
 	return $proto;
 } # end symbol
 
@@ -407,47 +424,57 @@ segments with some features already set. Example:
 	# Many at a time
 	@word = $symbols->segment('b', 'a', 'n');
 
+The segments returned from this method will already be associated with the
+current Lingua::Phonology::Features object and the current Symbols object.
+
 =cut
 
 sub segment {
 	my $self = shift;
 
 	# If you're not given a symbol, return a blank segment
-	return Lingua::Phonology::Segment->new( $self->features ) unless @_;
+	unless (@_) {
+		my $ret = Lingua::Phonology::Segment->new( $self->features );
+		$ret->symbolset($self);
+		return $ret;
+	}
 
 	# Otherwise
 	my @return;
 	while (@_) {
 		my $proto = $self->prototype( shift );
-		return 0 unless $proto; # So we don't have problems
+		return undef unless $proto; # So we don't have problems
 
 		my %values = $proto->all_values;
-		my $segment = Lingua::Phonology::Segment->new( $self->features );
-		# Make a completely new copy by setting all values
-		for (keys(%values)) {
-			$segment->value($_, $values{$_});
-		} # end for
-
+		my $segment = Lingua::Phonology::Segment->new($self->features, \%values);
+		$segment->symbolset($self);
 		push (@return, $segment);
 	} # end while
-	return @return;
+	return wantarray ? @return : $return[0];
 } # end new_segment
 
 =head2 features
 
-Take no arguments. Returns the Features object associated with the current
-object.
+Returns the Features object associated with the current object, or sets the
+object if provided with a Lingua::Phonology::Features object as an
+argument.
 
 =cut
 
 sub features {
 	my $self = shift;
+	if (@_) {
+		my $arg = shift;
+		return carp "Bad argument to features()" if not UNIVERSAL::isa($arg, 'Lingua::Phonology::Features');
+		$self->{FEATURES} = $arg;
+	}
 	return $self->{FEATURES};
 } # end features
 
 # A very short error writer
 sub err {
 	carp shift if warnings::enabled();
+	return undef;
 } # end err
 
 1;
@@ -465,71 +492,85 @@ L<http://www.phon.ucl.ac.uk/home/sampa/x-sampa.htm>. The default does not
 contain all of the symbols in X-SAMPA, but it does contain a lot of them.
 The symbols defined are as follows.
 
-	# Consonants
+	# Symbol definitions
 	# Labial
-	p	labial
-	b	labial voice
+	p	labial -continuant
+	b	labial voice -continuant
 	f	labial +continuant
 	v	labial voice +continuant
-	m	labial nasal
+	m	labial sonorant nasal -continuant
 
 	# Dental and alveolar
-	t	+anterior -distributed
-	d	+anterior -distributed voice
+	t	+anterior -distributed -continuant
+	d	+anterior -distributed voice -continuant
 	s	+anterior -distributed +continuant
 	z	+anterior -distributed voice +continuant 
 	T	+anterior +distributed +continuant
 	D	+anterior +distributed voice +continuant
-	n	+anterior -distributed sonorant nasal
-	l	+anterior -distributed sonorant lateral
-	r	+anterior -distributed sonorant
+	n	+anterior -distributed sonorant nasal -continuant
+	l	+anterior -distributed sonorant lateral approximant
+	r	+anterior -distributed sonorant approximant
 
 	# Palato-alveolar
-	tS	-anterior +distributed 
-	dZ	-anterior +distributed voice
+	tS	-anterior +distributed -continuant
+	dZ	-anterior +distributed voice -continuant
 	S	-anterior +distributed +continuant
 	Z	-anterior +distributed +continuant voice
 
 	# Retroflex
-	t`	-anterior -distributed
-	d`	-anterior -distributed voice
+	t`	-anterior -distributed -continuant
+	d`	-anterior -distributed voice -continuant
 	s`	-anterior -distributed +continuant
 	z`	-anterior -distributed +continuant voice
-	n`	-anterior -distributed nasal
-	r`	-anterior -distributed sonorant *nasal *lateral
+	n`	-anterior -distributed sonorant nasal -continuant
+	r`	-anterior -distributed sonorant approximant
 
 	# Velar
-	k	dorsal
-	g	dorsal voice
+	k	dorsal -continuant
+	g	dorsal voice -continuant
 	x	dorsal +continuant
 	G	dorsal voice +continuant
-	N	dorsal nasal
+	N	dorsal sonorant nasal -continuant
 
-	# Vowels
+	# Uvular
+	q	pharyngeal -continuant
+	G\	pharyngeal -continuant voice
+	X	pharyngeal +continuant
+	R	pharyngeal +continuant voice
+	N\	pharyngeal sonorant nasal -continuant
+	R\	pharyngeal sonorant approximant
+
+	# Glottal
+	?	-continuant
+	h	+continuant
+
+	# Vowels and vocoids
 	# High vowels
-	i	vocoid aperture=0 -anterior tense
-	I	vocoid aperture=0 -anterior 
-	u	vocoid aperture=0 dorsal labial tense
-	U	vocoid aperture=0 dorsal labial 
-	y	vocoid aperture=0 -anterior labial tense
-	Y	vocoid aperture=0 -anterior labial 
-	M	vocoid aperture=0 dorsal labial
-	1	vocoid aperture=0
-	}	vocoid aperture=0 labial
+	i	vocoid approximant sonorant aperture=0 -anterior tense
+	j	vocoid approximant sonorant aperture=0 -anterior tense *nucleus
+	I	vocoid approximant sonorant aperture=0 -anterior 
+	u	vocoid approximant sonorant aperture=0 dorsal labial tense
+	w	vocoid approximant sonorant aperture=0 dorsal labial tense *nucleus
+	U	vocoid approximant sonorant aperture=0 dorsal labial 
+	y	vocoid approximant sonorant aperture=0 -anterior labial tense
+	Y	vocoid approximant sonorant aperture=0 -anterior labial 
+	M	vocoid approximant sonorant aperture=0 dorsal labial
+	1	vocoid approximant sonorant aperture=0
+	}	vocoid approximant sonorant aperture=0 labial
 
 	# Mid vowels
-	e	vocoid aperture=1 -anterior tense
-	E	vocoid aperture=1 -anterior 
-	o	vocoid aperture=1 dorsal labial tense
-	O	vocoid aperture=1 dorsal labial
-	2	vocoid aperture=1 -anterior labial tense
-	9	vocoid aperture=1 -anterior labial
-	@	vocoid aperture=1
-	8	vocoid aperture=1 labial
+	e	vocoid approximant sonorant aperture=1 -anterior tense
+	E	vocoid approximant sonorant aperture=1 -anterior 
+	o	vocoid approximant sonorant aperture=1 dorsal labial tense
+	O	vocoid approximant sonorant aperture=1 dorsal labial
+	2	vocoid approximant sonorant aperture=1 -anterior labial tense
+	9	vocoid approximant sonorant aperture=1 -anterior labial
+	@	vocoid approximant sonorant aperture=1
+	8	vocoid approximant sonorant aperture=1 labial
 
 	# Low vowels
-	a	vocoid aperture=2
-	Q	vocoid aperture=2 labial
+	a	vocoid approximant sonorant aperture=2
+	Q	vocoid approximant sonorant aperture=2 labial
 
 These symbols depend upon the default feature set. If you aren't using the
 default feature set, you're on your own. If you've modified the default
@@ -542,6 +583,10 @@ Expand the default symbols set.
 
 Add functionality for diacritics to modify imperfect matches.
 
+=head1 SEE ALSO
+
+Lingua::Phonology, Lingua::Phonology::Features
+
 =head1 AUTHOR
 
 Jesse S. Bangs <F<jaspax@u.washington.edu>>.
@@ -552,3 +597,87 @@ This module is free software. You can distribute and/or modify it under the
 same terms as Perl itself.
 
 =cut
+
+__DATA__
+
+# Symbol definitions
+# Labial
+p	labial -continuant
+b	labial voice -continuant
+f	labial +continuant
+v	labial voice +continuant
+m	labial sonorant nasal -continuant
+
+# Dental and alveolar
+t	+anterior -continuant
+d	+anterior voice -continuant
+s	+anterior -distributed +continuant
+z	+anterior -distributed voice +continuant 
+T	+anterior +distributed +continuant
+D	+anterior +distributed voice +continuant
+n	+anterior sonorant nasal -continuant
+l	+anterior sonorant lateral approximant
+r	+anterior sonorant approximant
+
+# Palato-alveolar
+tS	-anterior +distributed -continuant
+dZ	-anterior +distributed voice -continuant
+S	-anterior +distributed +continuant
+Z	-anterior +distributed +continuant voice
+
+# Retroflex
+t`	-anterior -distributed -continuant
+d`	-anterior -distributed voice -continuant
+s`	-anterior -distributed +continuant
+z`	-anterior -distributed +continuant voice
+n`	-anterior -distributed sonorant nasal -continuant
+r`	-anterior -distributed sonorant approximant
+
+# Velar
+k	dorsal -continuant
+g	dorsal voice -continuant
+x	dorsal +continuant
+G	dorsal voice +continuant
+N	dorsal sonorant nasal -continuant
+
+# Uvular q	pharyngeal -continuant
+G\	pharyngeal -continuant voice
+X	pharyngeal +continuant
+R	pharyngeal +continuant voice
+N\	pharyngeal sonorant nasal -continuant
+R\	pharyngeal sonorant approximant
+
+# Glottal
+?	-continuant
+h	+continuant
+h\	+continuant voice
+
+# Vowels and vocoids
+# High vowels
+i	vocoid approximant sonorant aperture=0 -anterior tense
+j	vocoid approximant sonorant aperture=0 -anterior tense *nucleus
+I	vocoid approximant sonorant aperture=0 -anterior 
+u	vocoid approximant sonorant aperture=0 dorsal labial tense
+w	vocoid approximant sonorant aperture=0 dorsal labial tense *nucleus
+U	vocoid approximant sonorant aperture=0 dorsal labial 
+y	vocoid approximant sonorant aperture=0 -anterior labial tense
+Y	vocoid approximant sonorant aperture=0 -anterior labial 
+M	vocoid approximant sonorant aperture=0 dorsal labial
+1	vocoid approximant sonorant aperture=0
+}	vocoid approximant sonorant aperture=0 labial
+
+# Mid vowels
+e	vocoid approximant sonorant aperture=1 -anterior tense
+E	vocoid approximant sonorant aperture=1 -anterior 
+o	vocoid approximant sonorant aperture=1 dorsal labial tense
+O	vocoid approximant sonorant aperture=1 dorsal labial
+2	vocoid approximant sonorant aperture=1 -anterior labial tense
+9	vocoid approximant sonorant aperture=1 -anterior labial
+@	vocoid approximant sonorant aperture=1
+8	vocoid approximant sonorant aperture=1 labial
+
+# Low vowels
+a	vocoid approximant sonorant aperture=2
+Q	vocoid approximant sonorant aperture=2 labial
+
+__END__

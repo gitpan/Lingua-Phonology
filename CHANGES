@@ -1,0 +1,8 @@
+changes from v0.01
+* Added Syllable.pm
+* Added Functions.pm
+* Modified the rule algorithm for better speed
+* Added new features and symbols
+* Added Syllables.pm to Phonology package
+* Updated/edited documentation
+* Vastly expanded the test suite

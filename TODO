@@ -1,4 +1,4 @@
-Things I'd like to improve:
+Wishlist from 0.01:
 
 * Have better handling of suprasegmentals, rather than the hackish,
 unintuitive way it's done now. Ideally, we should be able to specify which
@@ -8,6 +8,28 @@ segments beneath it.
 
 * Provide a library of functions to be used in rules. These should provide
 simple implementations of common linguistic processes, like assimilate(),
-dissimilate(), etc.
+dissimilate(), etc. [Implemented in 0.11]
 
 * Someday in the far future, add Optimality Theory to the module.
+
+=============================
+
+Wishlist from 0.11:
+
+* Allow users to define their own codereferences for number_form and text_form
+in Features (will require some code revision).
+
+* Improve the Rules module for speed. Avoid the current bad implementation of
+deleting and altering segments.
+
+* Improve the Symbols module for speed.
+
+* Rewrite the defaults for Features and Symbols so that we don't need the
+open_defaults function anymore (why didn't I just do this in the first place?).
+
+* Allow for diacritics in the Symbols module.
+
+* Create a shell mode.
+
+* Create a loadfile method for Rules. This will be a major challenge, given the
+complexity of a rule.

@@ -30,11 +30,13 @@ of feature values.
 =head1 DESCRIPTION
 
 A Lingua::Phonology::Segment object provides a programmatic representation
-of a linguistic segment. Such a segment is associated with a 
+of a linguistic segment. Such a segment is associated with a
 Lingua::Phonology::Features object that lists the available features and
-the relationships between them. The segment itself is a list of the 
-values for those features. This module provides methods for returning and
-setting these feature values.
+the relationships between them. The segment itself is a list of the values
+for those features. This module provides methods for returning and setting
+these feature values. A segment may also be associated with a
+Lingua::Phonology::Symbols object, which allows the segment to return the
+symbol that it best matches. 
 
 =cut
 
@@ -44,13 +46,13 @@ use warnings::register;
 use Carp;
 use Lingua::Phonology::Features;
 
-our $VERSION = 0.1;
+our $VERSION = 0.11;
 
 =head1 METHODS
 
 =head2 new
 
-Takes on argument, a Lingua::Phonology::Features object. The Features 
+Takes one argument, a Lingua::Phonology::Features object. The Features 
 object provides the list of available features. If no such object is
 provided, this method will carp and return undefined.
 
@@ -60,13 +62,14 @@ sub new {
 	my $proto = shift;
 	my $class = ref($proto) || $proto;
 	my $self = { FEATURES => undef,
+				 SYMBOLS => undef,
 				 VALUES   => { } };
 	
 	my $featureset = shift; # An object in class Features
 	my $values = shift; # A hashref
 
 	# Require a $featureset of the proper type
-	return carp "No featureset (or bad featureset) given for new $class" if (not UNIVERSAL::isa($featureset, 'Lingua::Phonology::Features'));
+	return err("No featureset (or bad featureset) given for new $class") if (not UNIVERSAL::isa($featureset, 'Lingua::Phonology::Features'));
 
 	# Set your featureset
 	$self->{FEATURES} = $featureset;
@@ -92,8 +95,29 @@ feature set is set to the object provided.
 
 sub featureset {
 	my $self = shift;
+	if (@_) {
+		$self->{FEATURES} = shift if (UNIVERSAL::isa($_[0], 'Lingua::Phonology::Features'));
+		err("Bad feature set or too many arguments") if @_;
+	}
 	return $self->{FEATURES};
 } # end featureset
+
+=head2 symbolset
+
+Returns a Symbols object currently associated with the segment. You may
+call this method with one argument, in which case the symbol set is set to
+that argument.
+
+=cut
+
+sub symbolset {
+	my $self = shift;
+	if (@_) {
+		$self->{SYMBOLS} = shift if (UNIVERSAL::isa($_[0], 'Lingua::Phonology::Symbols'));
+		err("Bad symbol set or too many arguments") if @_;
+	}
+	return $self->{SYMBOLS};
+} # end symbolset
 
 =head2 value
 
@@ -124,13 +148,39 @@ turn be hash references, etc.). A node that has no defined children
 returns undef.
 
 Conversely, the second argument to value() must be a hash reference if the
-feature you are assigning to is a node.
+feature you are assigning to is a node. When you assign a hash reference to
+a node in this way, keys not present in the hash are not affected.
+Therefore, assigning an empty hash to a node does NOT cause the node to be
+deleted, as might be expected, but rather has not affect at all. For
+example:
 
-As a final note, in a hash reference returned from value(), the values for
-terminal features are actually scalar references pointing to the real
-values. See L<"value_ref"> for details on why.
+	# Both sonorant and vocoid are children of ROOT
+
+	$segment->value('sonorant', 1);   
+	# Now the value for ROOT is { sonorant => 1 }
+
+	$segment->value('ROOT', { vocoid => 1 });
+	# Now the value for ROOT is { sonorant => 1, vocoid => 1 }
+	
+	$segment->value('ROOT', {});
+	# The value for ROOT is still { sonorant => 1, vocoid => 1 }
+
+To delete a node, use the method L<"delink"> instead.
 
 =cut
+
+sub hash_deref {
+	my $hash = shift;
+	if (ref($hash) eq 'SCALAR') {
+		return $$hash;
+	}
+	elsif (ref($hash) eq 'HASH') {
+		for (keys %$hash) {
+			$hash->{$_} = hash_deref($hash->{$_});
+		}
+	}
+	return $hash;
+} #end hash_deref
 
 sub value {
 	my $self = shift;
@@ -141,7 +191,7 @@ sub value {
 	undef($$return) if not defined ($return);
 
 	# Return a hashref if that's what we've got, otherwise the value
-	return $return if (ref($return) eq 'HASH');
+	return hash_deref($return) if (ref($return) eq 'HASH');
 	return $$return;
 } # end value
 
@@ -157,7 +207,7 @@ this conversion see L<features/"number_form">.
 sub value_text {
 	my $self = shift;
 	my $return = $self->value(@_);
-	return $self->featureset->text_form($_[0], $return) unless ref($return);
+	return $self->{FEATURES}->text_form($_[0], $return) unless ref($return);
 	return $return;
 } # end value_text
 
@@ -213,6 +263,11 @@ value(). The following are exactly synonymous:
 Calling a feature-name method like this is always equivalent to calling
 value(), and never equivalent to calling value_text() or value_ref().
 
+WARNING: If you use a feature name that is the same as a reserved word
+(function or operator) in Perl, you can cause a non-terminating loop, due
+to the implementation of autoloaded functions. Use the longer form with
+value() instead.
+
 =cut
 
 our $term_handler = sub {
@@ -221,14 +276,14 @@ our $term_handler = sub {
 	# If we have a plain scalar ref, assign it directly
 	if (ref($value) eq 'SCALAR') {
 		# Check that the referred value is good
-		$$value = $self->featureset->number_form($feature, $$value);
+		$$value = $self->{FEATURES}->number_form($feature, $$value);
 		# Assign
 		$self->{VALUES}->{$feature} = $value;
 	} # end if
 
 	# Otherwise, assign the value via the current ref
 	else {
-		$value = $self->featureset->number_form($feature, $value);
+		$value = $self->{FEATURES}->number_form($feature, $value);
 
 		# If this feature is already defined, assign via the ref
 		if (my $ref = $self->{VALUES}->{$feature}) {
@@ -253,14 +308,14 @@ our $node_handler = sub {
 
 	for my $child (@{$featureref->{child}}) {
 		# Assign values to all children
-		$self->value_ref($child, $value->{$child});
+		$self->value_ref($child, $value->{$child}) if exists($value->{$child});
 	} # end for
 }; # end $node_handler
 		
 sub value_ref {
 	my $self = shift;
 	my $feature = shift; # A string name of a feature
-	my $featureref = $self->featureset->feature($feature); # The type of the features
+	my $featureref = $self->{FEATURES}->feature($feature); # The type of the features
 
 	# Check that the feature is valid
 	return undef if not $featureref;
@@ -288,7 +343,7 @@ sub value_ref {
 	# For nodes, build a hash
 	else {
 		my $hashref = {};
-		for my $child ($self->featureset->children($feature)) {
+		for my $child ($self->{FEATURES}->children($feature)) {
 			my $val = $self->value_ref($child);
 			$hashref->{$child} = $val if (defined($val));
 		} # end for
@@ -299,11 +354,11 @@ sub value_ref {
 
 =head2 delink
 
-Takes one argument, the name of a feature, and removes the value for that
-feature from the segment. The value for that feature will subsequently be
-undefined. This method does not affect the value that the internal 
-reference points to, so other segments that may be pointing to the same 
-value are unaffected. For example:
+Takes a list of arguments, which are names of feature, and removes the
+values for those features from the segment. The values for those features
+will subsequently be undefined. This method does not affect the value that
+the internal reference points to, so other segments that may be pointing to
+the same value are unaffected. For example:
 
 	$seg1->voice('1);
 	$seg2->voice($seg1->value_ref('voice')); # $seg1 and $seg2 refer to the same value
@@ -318,12 +373,29 @@ include a key-value pair like C<< voice => undef >> if you assign an undef to
 a value, as in line 4 above, while if you use delink(), no key for the 
 deleted feature will appear at all.
 
+Calling delink() on a node causes all children of the node to be delinked
+recursively. This is the only way to clear a node in one step.
+
+In scalar context, this method returns the number of items that were
+delinked. In list context, it returns a list of the former values of the
+features that were delinked. If you are delinking a node you will get a
+list of the values of the children of that node, in a consistent but not
+predictable order.
+
 =cut
 
 sub delink {
 	my $self = shift;
-	my $feature = shift;
-	delete($self->{VALUES}->{$feature});
+	my @return = ();
+	for (@_) {
+		if ($self->{FEATURES}->type($_) eq 'node') {
+			push @return, $self->delink($_) for ($self->{FEATURES}->children($_));
+		}
+		else {
+			push @return, delete($self->{VALUES}->{$_});
+		}
+	}
+	return @return;
 } # end delink
 
 =head2 all_values
@@ -348,6 +420,37 @@ sub all_values {
 
 	return %return;
 } # end all_values
+
+=head2 spell
+
+Takes no arguments. Returns a text string indicating the symbol that the
+current segment best matches if a Lingua::Phonology::Symbols object has
+been defined via symbolset(). Otherwise returns an error.
+
+=cut
+
+sub spell {
+	my $self = shift;
+	# normal case
+	return $self->{SYMBOLS}->spell($self) if $self->{SYMBOLS};
+	
+	# else
+	return err("Can't call spell()--no symbol set defined");
+}
+
+=head2 duplicate
+
+Takes no arguments. Returns a new Lingua::Phonology::Segment object that is
+an identical copy of the current object.
+
+=cut
+
+sub duplicate {
+	my $self = shift;
+	my %values = $self->all_values;
+	my $new = $self->new($self->featureset, \%values);
+	return $new;
+} # end duplicate
 
 =head2 clear
 
@@ -387,6 +490,7 @@ sub DESTROY {} # To avoid catching DESTROY in AUTOLOAD
 # A very short error writer
 sub err {
 	carp shift if warnings::enabled();
+	return undef;
 } # end err
 
 1;

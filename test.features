@@ -1,0 +1,7 @@
+# This file is needed for 'make test'. Once you've done that, you may safely
+# delete this file without consequences.
+
+node		node	privative binary scalar
+privative	privative
+binary		binary
+scalar		scalar

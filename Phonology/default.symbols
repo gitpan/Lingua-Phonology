@@ -1,65 +1,80 @@
 # Symbol definitions
 # Labial
-p	labial
-b	labial voice
+p	labial -continuant
+b	labial voice -continuant
 f	labial +continuant
 v	labial voice +continuant
-m	labial nasal
+m	labial sonorant nasal -continuant
 
 # Dental and alveolar
-t	+anterior -distributed
-d	+anterior -distributed voice
+t	+anterior -continuant
+d	+anterior voice -continuant
 s	+anterior -distributed +continuant
 z	+anterior -distributed voice +continuant 
 T	+anterior +distributed +continuant
 D	+anterior +distributed voice +continuant
-n	+anterior -distributed sonorant nasal
-l	+anterior -distributed sonorant lateral
-r	+anterior -distributed sonorant
+n	+anterior sonorant nasal -continuant
+l	+anterior sonorant lateral approximant
+r	+anterior sonorant approximant
 
 # Palato-alveolar
-tS	-anterior +distributed 
-dZ	-anterior +distributed voice
+tS	-anterior +distributed -continuant
+dZ	-anterior +distributed voice -continuant
 S	-anterior +distributed +continuant
 Z	-anterior +distributed +continuant voice
 
 # Retroflex
-t`	-anterior -distributed
-d`	-anterior -distributed voice
+t`	-anterior -distributed -continuant
+d`	-anterior -distributed voice -continuant
 s`	-anterior -distributed +continuant
 z`	-anterior -distributed +continuant voice
-n`	-anterior -distributed nasal
-r`	-anterior -distributed sonorant *nasal *lateral
+n`	-anterior -distributed sonorant nasal -continuant
+r`	-anterior -distributed sonorant approximant
 
 # Velar
-k	dorsal
-g	dorsal voice
+k	dorsal -continuant
+g	dorsal voice -continuant
 x	dorsal +continuant
 G	dorsal voice +continuant
-N	dorsal nasal
+N	dorsal sonorant nasal -continuant
 
-# Vowels
+# Uvular
+q	pharyngeal -continuant
+G\	pharyngeal -continuant voice
+X	pharyngeal +continuant
+R	pharyngeal +continuant voice
+N\	pharyngeal sonorant nasal -continuant
+R\	pharyngeal sonorant approximant
+
+# Glottal
+?	-continuant
+h	+continuant
+h\	+continuant voice
+
+# Vowels and vocoids
 # High vowels
-i	vocoid aperture=0 -anterior tense
-I	vocoid aperture=0 -anterior 
-u	vocoid aperture=0 dorsal labial tense
-U	vocoid aperture=0 dorsal labial 
-y	vocoid aperture=0 -anterior labial tense
-Y	vocoid aperture=0 -anterior labial 
-M	vocoid aperture=0 dorsal labial
-1	vocoid aperture=0
-}	vocoid aperture=0 labial
+i	vocoid approximant sonorant aperture=0 -anterior tense nucleus
+j	vocoid approximant sonorant aperture=0 -anterior *nucleus
+I	vocoid approximant sonorant aperture=0 -anterior nucleus
+u	vocoid approximant sonorant aperture=0 dorsal labial tense nucleus
+w	vocoid approximant sonorant aperture=0 dorsal labial *nucleus
+U	vocoid approximant sonorant aperture=0 dorsal labial nucleus 
+y	vocoid approximant sonorant aperture=0 -anterior labial tense nucleus
+Y	vocoid approximant sonorant aperture=0 -anterior labial  nucleus
+M	vocoid approximant sonorant aperture=0 dorsal labial nucleus
+1	vocoid approximant sonorant aperture=0 nucleus
+}	vocoid approximant sonorant aperture=0 labial nucleus
 
 # Mid vowels
-e	vocoid aperture=1 -anterior tense
-E	vocoid aperture=1 -anterior 
-o	vocoid aperture=1 dorsal labial tense
-O	vocoid aperture=1 dorsal labial
-2	vocoid aperture=1 -anterior labial tense
-9	vocoid aperture=1 -anterior labial
-@	vocoid aperture=1
-8	vocoid aperture=1 labial
+e	vocoid approximant sonorant aperture=1 -anterior tense nucleus
+E	vocoid approximant sonorant aperture=1 -anterior  nucleus
+o	vocoid approximant sonorant aperture=1 dorsal labial tense nucleus
+O	vocoid approximant sonorant aperture=1 dorsal labial nucleus
+2	vocoid approximant sonorant aperture=1 -anterior labial tense nucleus
+9	vocoid approximant sonorant aperture=1 -anterior labial nucleus
+@	vocoid approximant sonorant aperture=1 nucleus
+8	vocoid approximant sonorant aperture=1 labial nucleus
 
 # Low vowels
-a	vocoid aperture=2
-Q	vocoid aperture=2 labial
+a	vocoid approximant sonorant aperture=2 nucleus
+Q	vocoid approximant sonorant aperture=2 labial nucleus

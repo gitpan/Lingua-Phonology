@@ -20,6 +20,15 @@ linguistic representations of phonology.
 
 	# Do with them as you will . . .
 
+=head1 ABSTRACT
+
+Lingua::Phonology is a unified module for handling phonological descriptions
+and units. It includes sub-modules for hierarchical (feature-geometric) sets of
+features, phonetic or orthographic symbols, individual segments, linguistic
+rules, syllabification algorithms, etc. It is written as an object-oriented
+module, wherein one will generally have a single object for the list of
+features, one for the phonetic symbols, one for the set of rules, etc., and
+multiple segment objects to be programatically manipulated.
 
 =head1 DESCRIPTION
 
@@ -29,7 +38,7 @@ orthographic symbols, individual segments, and linguistic rules.
 
 Lingua::Phonology itself is just a meta-module providing easy access to the
 sub-modules. The real work is done by the sub-modules, of which there are
-currently four:
+currently six: 
 
 =over 4
 
@@ -50,6 +59,18 @@ Lingua::Phonology::Segment objects and methods for spelling them out.
 
 Lingua::Phonology::Rules - a set of rules that can be aplied to words of segments.
 
+=item *
+
+Lingua::Phonology::Functions - a set of importable functions to be used
+together with Lingua::Phonology::Rules. Significantly simplifies writing
+rules.
+
+=item *
+
+Lingua::Phonology::Syllable - a module that syllabifies an imput word
+according to a set of parameters, to be used together with
+Lingua::Phonology::Rules.
+
 =back
 
 The description of the function and use of each of these modules is on
@@ -59,9 +80,13 @@ the order given above to best understand them.
 =head1 WARNINGS
 
 Always C<use> them. Lingua::Phonology contains many useful warnings, but it
-generally will not display them unless C<use warnings> is on.
+generally will not display them unless C<use warnings> is on. All of the
+modules within Lingua::Phonology provide named warnings spaces, so you can
+turn the warnings specific to Lingua::Phonology or any submodule on or off.
 
-Plus, you should do that anyway.
+	use warnings 'Lingua::Phonology';       # use all warnings w/in Lingua::Phonology
+	no warnings 'Lingua::Phonology::Rules'; # ignore warnings coming from Lingua::Phonology::Rules
+	# etc.
 
 =cut
 
@@ -69,13 +94,15 @@ use v5.6.1;
 
 use strict;
 use Carp;
+use warnings::register;
 
 use Lingua::Phonology::Features;
 use Lingua::Phonology::Segment;
 use Lingua::Phonology::Symbols;
 use Lingua::Phonology::Rules;
+use Lingua::Phonology::Syllable;
 
-our $VERSION = 0.01;
+our $VERSION = 0.11;
 
 =head1 METHODS
 
@@ -92,13 +119,12 @@ appropriate, so it is rarely necessary to C<new> on any of the sub-modules.
 sub new {
 	my $proto = shift;
 	my $class = ref($proto) || $proto;
-	my $self = { FEATURES => undef,
-	             SYMBOLS  => undef,
-				 RULES    => undef };
+	my $self = {};
 	
 	$self->{FEATURES} = new Lingua::Phonology::Features;
 	$self->{SYMBOLS} = Lingua::Phonology::Symbols->new($self->{FEATURES});
 	$self->{RULES} = new Lingua::Phonology::Rules;
+	$self->{SYLL} = new Lingua::Phonology::Syllable;
 
 	bless $self, $class;
 	return $self;
@@ -118,7 +144,7 @@ sub features {
 		my $arg = shift;
 		return carp "Bad argument to features()" if not UNIVERSAL::isa($arg, 'Lingua::Phonology::Features');
 		$self->{FEATURES} = $arg;
-		$self->{SYMBOLS}->{FEATURES} = $arg;
+		$self->{SYMBOLS}->features($arg);
 	}
 	return $self->{FEATURES};
 }
@@ -158,17 +184,37 @@ sub rules {
 	return $self->{RULES};
 }
 
+=head2 syllable
+
+Returns a Lingua::Phonology::Syllable object, or sets the current object if
+a Syllable object is provided as an argument.
+
+=cut
+
+sub syllable {
+	my $self = shift;
+	if (@_) {
+		my $arg = shift;
+		return carp "Bad argument to syll()" if not UNIVERSAL::isa($arg, 'Lingua::Phonology::Syllable');
+		$self->{SYLL} = $arg;
+	}
+	return $self->{SYLL};
+} # end syll
+
 =head2 segment
 
-Returns a new Lingua::Phonology::Segment object. This method takes no
-arguments, and cannot be used to initialize a segment. Therefore, it's
-probably easier to use the segment() method in Lingua::Phonology::Symbols.
+Returns a new Lingua::Phonology::Segment object associated with the current
+feature set and the current symbol set. This method takes no arguments, and
+cannot be used to initialize a segment. Therefore, it's probably easier to
+use the segment() method in Lingua::Phonology::Symbols.
 
 =cut
 
 sub segment {
 	my $self = shift;
-	return Lingua::Phonology::Segment->new($self->{FEATURES});
+	my $seg = Lingua::Phonology::Segment->new($self->{FEATURES});
+	$seg->symbolset($self->{SYMBOLS});
+	return $seg;
 }
 
 1;

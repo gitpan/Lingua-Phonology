@@ -35,13 +35,12 @@ algorithm.
 =cut
 
 use strict;
-use warnings;
 use warnings::register;
 use Carp;
 use Lingua::Phonology::Segment;
 use Lingua::Phonology::PseudoSegment;
 
-our $VERSION = 0.1;
+our $VERSION = 0.11;
 
 =head1 METHODS
 
@@ -64,9 +63,9 @@ sub new {
 
 =head2 add_rule
 
-Adds one or more rules to the list. Takes  series of key-value pairs, where
-the keys are the names of rules to be added, and the values must also be
-hashrefs. The following are accepted as keys for the value hashref:
+Adds one or more rules to the list. Takes a series of key-value pairs, where
+the keys are the names of rules to be added, and the values are hashrefs. The
+following are accepted as keys for the value hashref:
 
 =over 4
 
@@ -88,14 +87,19 @@ either 'leftward' or 'rightward.' If no direction is given, defaults to
 
 =item *
 
+B<filter> - defines a filter for the segments that the rule applies on.
+Must a code reference that returns a truth value.
+
+=item *
+
 B<where> - defines the condition or conditions where the rule applies. Must be a 
 coderef that returns a truth value. If no value is given, defaults to 
 always true.
 
 =item *
 
-B<do> - defines the action to take when the C<where> condition is met. If
-no value is given, does nothing.
+B<do> - defines the action to take when the C<where> condition is met. Must be
+a code reference. If no value is given, does nothing.
 
 =back
 
@@ -112,12 +116,15 @@ defined elsewhere.
 										   do => \&denasalize     # Another code reference
 	});
 
+This method returns true if all rules were added successfully, otherwise false;
+
 =cut
 
 # Defines valid properties for rules
 our %property = ( where => 1,
 			  do	=> 1,
 			  tier  => 1,
+			  filter => 1,
 			  domain => 1,
 			  direction => 1 );
 
@@ -125,8 +132,9 @@ sub add_rule {
 	my $self = shift;
 	my %rules = @_;
 
-	RULE: for (keys(%rules)) {
-		my $params = $rules{$_};
+	my $return = 1;
+	RULE: for my $rule (keys(%rules)) {
+		my $params = $rules{$rule};
 
 		# Check all of the possible parameters for type
 		# Tier and domain are not checkable, since they depend on the
@@ -137,37 +145,64 @@ sub add_rule {
 		$params->{direction} = lc $params->{direction};
 		$params->{direction} = 'rightward' if not $params->{direction}; # Default
 		if ($params->{direction} ne 'rightward' && $params->{direction} ne 'leftward') {
-			err("Improper direction for rule $_");
+			err("Improper direction for rule $rule");
+			$return = 0;
 			next RULE;
 		} # end if
 		
-		# Check the where
-		$params->{where} = sub {1} if not $params->{where}; # Default to 'always true'
-		if (ref($params->{where}) ne 'CODE') {
-			err("'where' for $_ is not a code reference");
-			next RULE;
-		} # end if
-
-		# Check the do
-		$params->{do} = sub {} if not $params->{do}; # Default to 'nothing'
-		if (ref($params->{do}) ne 'CODE') {
-			err("'do' for $_ is not a code reference");
-			next RULE;
-		} # end if
+		# Set defaults for where and do
+		$params->{where} = sub {1} if not $params->{where}; # Default to always true
+		$params->{do} = sub {} if not $params->{do}; # Default to nothing
+		for ('filter','where','do') {
+			if ($params->{$_}) {
+				if (ref($params->{$_}) ne 'CODE') {
+					err("$_ for $rule is not a code reference");
+					$return = 0;
+					next RULE;
+				}
+			}
+		}
 
 		# If you get this far, you're okay
-		$self->{RULES}->{$_} = $params;
+		$self->{RULES}->{$rule} = $params;
 	} # end for
-	return $self->{RULES};
+	return $return;
+} # end sub
+
+=head2 clear
+
+Resets the Lingua::Phonology::Rules object by deleting all rules and all
+rule ordering.
+
+=cut
+
+sub clear {
+	my $self = shift;
+	$self->{RULES} = {};
+	$self->{ORDER} = [];
+	$self->{PERSIST} = [];
+	return 1;
 } # end sub
 
 =head2 tier
 
+See below.
+
 =head2 domain
+
+See below.
 
 =head2 direction
 
+See below.
+
+=head2 filter
+
+See below.
+
 =head2 where
+
+See below.
 
 =head2 do
 
@@ -183,9 +218,22 @@ argument. For example:
 	$rules->domain('Rule', 'feature');	# Sets the domain to 'feature'
 	# Etc., etc.
 
+DIRE WARNINGS: These methods do not do any checking for appropriateness of
+input. Therefore, if you use one of these methods to set a rule property to an
+improper value, you won't find out until you attempt to execute the rule, at
+which point you'll get (potentially fatal) errors.
+
 =cut
 
 # Private functions needed by apply()
+
+# Features we use
+our %features = ( BOUNDARY => { type => 'privative' },
+				  INSERT_RIGHT => { type => 'scalar' },
+				  INSERT_LEFT => { type => 'scalar' },
+				  _NEW => { type => 'privative' },
+				  _RULE => { type => 'scalar' }
+);
 
 # A simplistic func to flatten hashrefs into easily comparable strings
 sub flatten {
@@ -223,7 +271,7 @@ our $make_domain = sub {
 }; # end $make_domain
 
 # Make tiers
-our $filter_tier = sub {
+our $make_tier = sub {
 	my $tier = shift;
 	my (@return, @temp);
 	for (@_) {
@@ -237,7 +285,7 @@ our $filter_tier = sub {
 	} # end for
 
 	return @return;
-}; # end filter_tier
+}; # end make_tier
 
 # Readably do the rotations
 our $rightward = sub {
@@ -250,21 +298,49 @@ our $leftward = sub {
 	return @_;
 }; # end rotate
 
-# Return only list elements that have some values set
+# Return only list elements that have some values set and include
+# INSERT_LEFT and INSERT_RIGHT segments
 our $cleanup = sub {
 	my @return = ();
 	for (@_) {
+		next if not $_;
 		my ($right, $left);
-		push (@return, $left) if ($left = $_->INSERT_LEFT);
+		if ($left = $_->INSERT_LEFT) {
+			# $left->_NEW(1);
+			push(@return, $left);
+			# $_->delink('INSERT_LEFT');
+		} # end if
 		push (@return, $_);
-		push (@return, $right) if ($right = $_->INSERT_RIGHT);
+		if ($right = $_->INSERT_RIGHT) {
+			# $right->_NEW(1);
+			push(@return, $right);
+			# $_->delink('INSERT_RIGHT');
+		} # end if
 	} # end for
 	# This line is ugly, but the nicer keys($_->all_values) didn't work. WTF?
 	return grep { my %hash = $_->all_values; scalar(keys(%hash)) } @return;
 }; # end cleanup
 
+# Make the fully modified string reconstructible so that $cleanup will put
+# it back how it should be
+our $reconstruct = sub {
+	for (0 .. $#_) {
+		if ($_[$_]->_NEW) {
+			if ($_[$_ - 1]->BOUNDARY) {
+				$_[$_ + 1]->INSERT_LEFT($_[$_]);
+			} # end if
+			else {
+				$_[$_ - 1]->INSERT_RIGHT($_[$_]);
+			} # end else
+		} # end if
+	} # end for
+	return @_;
+}; # end reconstruct
+
+
 # Actually execute the code
 our $execute = sub {
+
 	my $self = shift;
 	my $rule = shift;
 	return if not @_; # What's left of @_ is the segment list
@@ -276,25 +352,52 @@ our $execute = sub {
 	unshift (@_, $bound);
 
 	# Get the important properties
+	my $filter = $self->filter($rule);
 	my $where = $self->where($rule);
 	my $do = $self->do($rule);
 	my $dir = $self->direction($rule);
 
+	# Make properties available via _RULE
+	$_->_RULE($self->{RULES}->{$rule}) for (@_);
+
+	# Apply the filter; always allow BOUNDARY segments through
+	@_ = grep { &$filter($_) || $_->BOUNDARY } @_ if $filter;
+
 	# Rotate to starting positions
-	@_ = &$leftward(&$leftward(@_)) if ($dir eq 'leftward');
-	@_ = &$rightward(@_) if ($dir eq 'rightward');
+	my $next;
+	if ($dir eq 'leftward') {
+		@_ = &$leftward(@_); # We need one extra rotation for leftward
+		$next = $leftward;
+	} # end if
+	else {
+		$next = $rightward;
+	} # end if
+	@_ = &$next(@_);
+
+	# Count the times the rule applies
+	my $count = 0;
 
 	# Iterate over each segment
 	do {
-		@_ = &$cleanup(@_); # This cleanup only affects the local @_
+		# @_ = &$cleanup(@_); # This cleanup only affects the local @_
 		if (&$where(@_)) {
 			&$do(@_);
+			$count++;
 		} # end if
 		# Rotate to the next segment
-		@_ = &$leftward(@_) if ($dir eq 'leftward');
-		@_ = &$rightward(@_) if ($dir eq 'rightward');
+		@_ = &$next(@_);
+		
+		# If someone has destroyed our features, put them back before bad
+		# things happen
+		if (not $_[0]->featureset->feature('BOUNDARY')) {
+			$_[0]->featureset->add_feature(%features);
+		}
 	} # end do
 	while (not $_[0]->BOUNDARY);
+
+	# Do final cleanup and reconstruction
+	# &$reconstruct(&$cleanup(@_));
+	return $count;
 }; # end execute
 
 =head2 apply
@@ -307,6 +410,10 @@ domains, if specified. For a full explanation on how apply() works and how
 to exploit it, see below in L<WRITING RULES>. Example:
 
 	$rules->apply('Denasalization', \@word); # Word must be an array of Segment objects
+
+As of v.0.1, the return value of apply() is an integer indicating how many
+times the rule applied (i.e. how many times the C<do> property was actually
+executed).
 
 =head2 Applying rules by name
 
@@ -325,12 +432,24 @@ instead.
 
 sub apply {
 	my ($self, $rule, $word) = @_;
+
+	return err("No such rule $rule") if not exists($self->{RULES}->{$rule});
+	return 0 if not @$word;
+	
+	# Check that we have good segments
+	for (@$word) {
+		if (not UNIVERSAL::isa($_, 'Lingua::Phonology::Segment')) {
+			carp "Bad arguments to apply";
+			return 0;
+		}
+	}
 	
 	# Assume that all segments share a featureset, and add our pseudo-features to that set
 	my $featureset = $word->[0]->featureset; 
-	$featureset->add_feature( BOUNDARY => { type => 'privative' },
-						      INSERT_RIGHT => { type => 'scalar' },
-							  INSERT_LEFT => { type => 'scalar' });
+	$featureset->add_feature(%features);
+	
+	# Count the times the rule applies (to be incremented in &$execute)
+	my $count = 0;
 
 	my $tier = $self->tier($rule);
 	# Set up domains and execute on them, if needed
@@ -338,10 +457,10 @@ sub apply {
 		my @domains = &$make_domain($domain, @$word);
 		for (@domains) {
 			if ($tier) {
-				&$execute($self, $rule, &$filter_tier($tier, @$_));
+				$count += &$execute($self, $rule, &$make_tier($tier, @$_));
 			}
 			else {
-				&$execute($self, $rule, @$_);
+				$count += &$execute($self, $rule, @$_);
 			} # end if/else
 		} # end for
 	} #end if
@@ -349,27 +468,27 @@ sub apply {
 	# If there are no domains specified, simply execute on the whole word
 	else {
 		if ($tier) {
-			&$execute($self, $rule, &$filter_tier($tier, @$word));
+			$count += &$execute($self, $rule, &$make_tier($tier, @$word));
 		}
 		else { 
-			&$execute($self, $rule, @$word);
+			$count += &$execute($self, $rule, @$word);
 		} # end if/else
 	} # end else
 
 	# Clean up the word
 	# These actually affect the output word directly
 	@$word = &$cleanup(@$word);
-	for (@$word) {
-		$_->delink('INSERT_RIGHT');
-		$_->delink('INSERT_LEFT');
+
+	# Remove our temporary feature settings
+	for my $feature (keys(%features)) {
+		$_->delink($feature) for (@$word);
+		$featureset->drop_feature($feature);
 	} # end for
 
-	# Drop our temporary features
-	$featureset->drop_feature('BOUNDARY', 'INSERT_RIGHT', 'INSERT_LEFT');
-
-	return @$word;
+	return $count;
 } #end if
 
+# Makes rules appliable by their name
 our $AUTOLOAD;
 sub AUTOLOAD {
 	my $method = $AUTOLOAD;
@@ -395,6 +514,7 @@ sub AUTOLOAD {
 		eval qq! sub $method {
 			my \$self = shift;
 			my \$rule = shift;
+			return err("no such rule '\$rule'") if not exists \$self->{RULES}->{\$rule};
 			my \$ruleref = \$self->{RULES}->{\$rule};
 			\$ruleref->{$method} = shift if \@_;
 			return \$ruleref->{$method};
@@ -421,23 +541,38 @@ part of the current object but which aren't specified in order() or
 persist() are not applied. See L<"order"> and L<"persist"> for details on 
 those methods.
 
+As of v0.1, apply_all() in list context returns a hash whose keys are the
+names of rules, and whose values are the number of times each rule applied.
+In scalar context, it returns the sum of all the times that a rule was
+applied.
+
 =cut
 
 sub apply_all {
 	my ($self, $word) = @_;
+	my %return = ();
 	
 	my @persist = $self->persist; # Only get this once, for speed
 	for ($self->order) {
 		for (@persist) {
-			$self->apply($_, $word);
+			$return{$_} = $self->apply($_, $word);
 		} # end for
-		$self->apply($_, $word);
+		$return{$_} = $self->apply($_, $word);
 	} # end for
 
 	# Apply persistent rules one last time before finishing
 	for (@persist) {
-		$self->apply($_, $word);
+		$return{$_} = $self->apply($_, $word);
 	} # end for
+
+	if (wantarray) {
+		return %return;
+	}
+	elsif (defined wantarray) {
+		my $count;
+		$count += $_ for values %return;
+		return $count;
+	}
 } # end sub
 
 =head2 order
@@ -481,6 +616,7 @@ sub persist {
 # A very short error writer
 sub err {
 	carp shift if warnings::enabled();
+	return undef;
 } # end err
 
 =head1 WRITING RULES
@@ -494,24 +630,30 @@ here's a general overview of what goes on in the execution of a rule:
 
 =item *
 
-The input word is taken and the tier, if there is one, is applied to it.
-This always reduces the number of segments being evaluated. Details of this
-process are discussed below in L<"using tiers">.
-
-=item *
-
-The remaining segments are broken up into domains, if a domain is
+The segments of the input word are broken up into domains, if a domain is
 specified. This is discussed in L<"using domains">.
 
 =item *
 
-The output of domaining is sent to the executer. Executing the rule
-involves examining every segment in turn and deciding if the criteria for
-applying the rule are met. If so, the action is performed. If the direction
-of the rule is specified as "rightward", then the criterion-checking and
-rule execution begin with the leftmost segment and proceed to the right.
-If the direction is "leftward", the opposite occurs: focus begins on the
-rightmost segment and proceeds to the left.
+The segments of each domain are taken and the tier, if there is one, is
+applied to it.  This always reduces the number of segments being evaluated.
+Details of this process are discussed below in L<"using tiers">.
+
+=item *
+
+The segments remaining after the tier is applied are passed through the
+filter. Segments for which the filter evaluates to true are passed on to
+the executer.
+
+=item *
+
+Executing the rule involves examining every segment in turn and deciding if
+the criteria for applying the rule, defined by the C<where> property, are
+met. If so, the action is performed.  If the direction of the rule is
+specified as "rightward", then the criterion-checking and rule execution
+begin with the leftmost segment and proceed to the right.  If the direction
+is "leftward", the opposite occurs: focus begins on the rightmost segment
+and proceeds to the left.
 
 =back
 
@@ -654,6 +796,44 @@ This (hopefully) makes linguistic sense--if you're using the tier
 syllables. So that's what you see in your rule: "segments" that are really
 syllables and include all of the true segments inside them.
 
+=head2 Using filters
+
+Filters are a more flexible, but less magical, way of doing the same thing
+that a tier does. You define a filter as a code reference, and all of the
+segments in the input word are put through that code before going on to the
+rule execution. Your code reference should accept a single
+Lingua::Phonology::Segment object as an argument and return some sort of
+truth value that determines whether the segment should be included.
+
+A filter is a little like a tier and a little like a where, so here's how
+it differs from both of those:
+
+=over 4
+
+=item *
+
+Unlike a tier, the C<filter> property is a code reference. That means that
+your test can be arbitrarily complex, and is not limited to simply testing
+for whether a property is defined like a tier. On the other hand, there is
+no magical combination of segments with a tier.
+
+=item *
+
+Unlike a C<where> property, a filter code reference only gets one segment
+at a time. Therefore, you can't refer to adjacent segments when you're
+writing the code reference for a filter. Also, the rule algorithm takes the
+filter and goes over the whole word with it once, picking out those
+segments that pass through the filter. It then hands the filtered list of
+segments to be evaluated by C<where> and C<do>. A C<where> property is
+evaluated for each segment in turn, and if the C<where> evaluates to true,
+the C<do> code is immediately executed.
+
+=back
+
+Filters are primarily useful when you want to only see segments that meet a
+certain binary or scalar feature value, or when you want to avoid the
+magical segment-joining of a tier.
+
 =head2 Using domains
 
 Domains, like tiers, change the segments that are visible to your rules. A
@@ -731,6 +911,46 @@ unsyllabified:
 
 Note that the methods INSERT_RIGHT() and INSERT_LEFT() don't exist except
 inside the coderef for a rule.
+
+=head2 Developer goodies
+
+Theres a couple of things here that are probably of no use to the average
+user, but have come in handywhen developing code for other modules or
+scripts to use. And who knows, you may have a use for them.
+
+First, any segment that has been inserted as part of the current rule will
+have a property C<_NEW>. This property will disappear as soon as the
+current rule finishes, so it is only useful if you want to know if a
+segment has been inserted in the very recent past.
+
+Second, all segments have the property C<_RULE> during the execution of a
+rule. This method returns a hash reference that has keys corresponding to
+the properties of the currently executing rule. These properties include
+C<do, where, domain, tier, direction>, etc. If for some reason you need to
+know or change one of these during the execution of a rule, you can use
+this to do so. Note that altering the hash reference will alter the actual
+properties of the current rule--although you won't notice it until the next
+time the rule is executed.
+
+Here's a silly example:
+
+	sub print_direction {
+		print $_[0]->_RULE->{direction}, "\n";
+	}
+
+	# Assume that we have $rules and @word lying around
+	$rules->add_rule(
+		PrintLeft => {
+			direction => 'leftward',
+			do => \&print_direction
+		},
+		PrintRight => {
+			direction => 'rightward',
+			do -> \&print_direction
+		});
+	
+	$rules->PrintLeft(\@word);    # Prints 'leftward' several times
+	$rules->PrintRight(\@word);   # Prints 'rightward' several times
 
 =head1 TO DO
 

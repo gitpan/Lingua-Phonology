@@ -1,20 +1,22 @@
 # Definition of true features, concerned with articulation of segments
-ROOT		node		sonorant approximant vocoid nasal lateral Laryngeal OralCavity
+ROOT		node		sonorant approximant vocoid nasal lateral continuant Laryngeal Place
 sonorant	privative
 approximant	privative
 vocoid		privative
 nasal		privative
 lateral		privative
+continuant	binary
 
-Laryngeal	node		spread constricted voice
+Laryngeal	node		spread constricted voice ATR
 spread		privative
 constricted	privative
 voice		privative
+ATR			binary
 
-OralCavity	node		Cplace continuant
-continuant	binary
+Place		node		pharyngeal Oral
+pharyngeal	privative
 
-Cplace		node		labial Lingual Vocalic
+Oral		node		labial Lingual Vocalic
 labial		privative
 
 Lingual		node		Coronal dorsal
@@ -31,7 +33,8 @@ Vplace		node		labial Lingual
 
 # Definition of syllable-related features, used for parsing syllables
 # These aren't truly heirarchical, to allow for proper domaining
-SYLLABLE	privative
+SON			scalar
+SYLL		scalar
 Rime		privative
 onset		privative
 nucleus		privative

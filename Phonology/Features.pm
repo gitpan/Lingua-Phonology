@@ -49,7 +49,8 @@ use warnings::register;
 use Carp;
 use Lingua::Phonology::Default;
 
-our $VERSION = 0.1;
+our $VERSION = 0.11;
+
 
 =head1 METHODS
 
@@ -96,10 +97,13 @@ of the feature being added.
 
 =back
 
-Note that the features named in C<parent> or C<child> must already be 
-defined when the new feature is added. Thus, trying to add parents and 
+Note that the features named in C<parent> or C<child> must already be
+defined when the new feature is added. Thus, trying to add parents and
 children as part of the same call to add_feature() will almost certainly
 result in errors.
+
+This method returns a list of all of the current features after new
+features have been added.
 
 Example:
 
@@ -192,20 +196,22 @@ sub feature {
 Given the name of a feature, deletes the given feature from the current
 list of features. Note that deleting a node feature does not cause its
 children to be deleted--it just causes them to revert to being
-undominated.
+undominated. This method always returns true.
 
 =cut
 
 sub drop_feature {
 	my $self = shift;
 	delete($self->{$_}) for @_;
+	return 1; # always return true
 } # end drop_feature
 
 =head2 change_feature
 
 This method works identically to add_feature(), but it first checks to see
-that the feature being changed already exists. If it doesn't, it will
-give an error.
+that the feature being changed already exists. If it doesn't, it will give
+an error. If every attempted change given to this function succeeds, then
+this method returns 1. Otherwise, it returns 0.
 
 The add_feature() method can also be used to change existing features--this
 method exists only to aid readability.
@@ -215,14 +221,19 @@ method exists only to aid readability.
 sub change_feature {
 	my $self = shift;
 	my %hash = @_;
+	my $return = 1;
 
-	for (keys(%hash)) {
+	FEATURE: for (keys(%hash)) {
 		# Check that there is such a feature
-		next unless $self->feature($_);
+		if (not $self->feature($_)) {
+			$return = 0;
+			next FEATURE;
+		}
 
 		# Pass the buck to add_feature
-		$self->add_feature($_ => $hash{$_});
+		$self->add_feature($_ => $hash{$_}) or $return=0;
 	} # end for
+	return $return;
 } # end change_feature
 
 =head2 all_features
@@ -266,10 +277,10 @@ sub loadfile {
 
 	no strict 'refs';
 	if ($file) {
-		open $file, $file or return carp "Couldn't open $file: $!";
+		open $file, $file or return err("Couldn't open $file: $!");
 	}
 	else {
-		$file = open_default('features');
+		$file = Lingua::Phonology::Default::open('features');
 	} # end if/else
 
 	my (%children, %symbols);
@@ -302,10 +313,7 @@ features that are children of the feature given.
 sub children {
 	my $self = shift;
 	my $feature = shift;
-	my $featureref = $self->feature($feature);
-
-	# Check that this is a valid feature
-	return undef if not $featureref;
+	my $featureref = $self->feature($feature) or return undef;
 
 	return @{$featureref->{child}} if ($featureref->{child}); # return a real array
 	return (); # Empty array otherwise
@@ -313,27 +321,28 @@ sub children {
 
 =head2 add_child
 
-The first argument to this method should be the name of a node-type feature.
-The remaining arguments are the names of features to be assigned as children
-to the first feature.
+The first argument to this method should be the name of a node-type
+feature.  The remaining arguments are the names of features to be assigned
+as children to the first feature. If all children are added without errors,
+this function returns 1. Otherwise it returns false.
 
 =cut
 
 sub add_child {
 	my $self = shift;
 	my $parent = shift;
-	my @children = @_;
-	my $parentref = $self->feature($parent);
-
-	# Check that the parent feature exists
-	return undef unless $parentref;
+	my $parentref = $self->feature($parent) or return undef;
+	my $return = 1;
 
 	# Check that the parent is a node
 	return err("$parent is not a node") if ($parentref->{type} ne 'node');
 
-	CHILD: for my $child (@children) {
+	CHILD: for my $child (@_) {
 		# Check that the child feature exists
-		next unless $self->feature($child);
+		if (not $self->feature($child)) {
+			$return = 0;
+			next CHILD;
+		}
 
 		# Check that you haven't already defined this child
 		for (@{$parentref->{child}}) {
@@ -347,25 +356,26 @@ sub add_child {
 		push(@{$parentref->{child}}, $child);
 	} # end for
 
-	return $parentref;
+	return $return;
 } # end sub
 
 =head2 drop_child
 
-Like add_child, the first argument to this function should be the name of
-a node feature, and the remaining arguments are the names of children of
-that node. The child features so named will be deleted from the list of 
-children for that node.
+Like add_child, the first argument to this function should be the name of a
+node feature, and the remaining arguments are the names of children of that
+node. The child features so named will be deleted from the list of children
+for that node. This function returns a hash reference for the parent
+feature, showing the modifications to its C<child> key that have just been
+made, except when no such feature exists, in which case it gives an error.
 
 =cut
 
 sub drop_child {
 	my $self = shift;
 	my $parent = shift;
-	my @children = @_;
-	my $parentref = $self->feature($parent);
+	my $parentref = $self->feature($parent) or return undef;
 
-	for my $child (@children) {
+	for my $child (@_) {
 		for (0 .. $#{$parentref->{child}}) {
 			delete($parentref->{child}->[$_]) if $parentref->{child}->[$_] eq $child;
 		} # end for
@@ -385,7 +395,8 @@ sub parents {
 	my $feature = shift;
 	
 	my @parents;
-	for my $parent (keys(%{$self->all_features})) {
+	my %features = $self->all_features;
+	for my $parent (keys(%features)) {
 		for ($self->children($parent)) {
 			push (@parents, $parent) if ($feature eq $_);
 		} # end for
@@ -398,28 +409,32 @@ sub parents {
 
 Takes two or more arguments. The first argument is the name of a feature,
 and the remaining arguments are the names of nodes that should be parents
-of that feature.
+of that feature. Returns true if all of the attempted operations succeeded,
+otherwise returns false. Note that a false return does not mean that all
+operations failed, only some.
 
 =cut
 
 sub add_parent {
 	my $self = shift;
 	my $child = shift;
-	my @parents = @_;
+	my $return = 1;
 
 	# This action is identical to add_child, but with order of arguments switched
 	# So just pass the buck
-	for (@parents) {
-		$self->add_child($_, $child);
+	for (@_) {
+		$self->add_child($_, $child) or $return = 0;
 	} # end for
-	return $self->feature($child);
+	return $return;
 } # end add_parent
 
 =head2 drop_parent
 
 Takes two or more arguments. The first is a feature name, and the remaining
 arguments are the names of features that are currently parents of that
-feature. Those features will cease to be parents of the first feature.
+feature. Those features will cease to be parents of the first feature. This
+feature always returns a hash reference giving the properties of the child
+feature.
 
 =cut
 
@@ -516,46 +531,42 @@ unchanged.
 
 =cut
 
-# The following coderefs exist for each feature type defined
-our $privative_num = sub {
-	return 1 if $_[0];
-	return undef;
-}; # end privative
-
-our $binary_num = sub {
-	my $value = shift;
-	# Text values
-	return 0 if ($value eq '-');
-	return 1 if ($value eq '+');
-	# If not given a text value
-	return 1 if ($value);
-	return 0;
-}; # end sub
-
-our $scalar_num = sub {
-	return $_[0]; # Nothing happens to scalars
-}; # end scalar
-
-our $node_num = sub {
-	return undef if ref($_[0]) ne 'HASH'; # Nodes should be hashrefs
-	return $_[0];
-}; # end node
-
-# Add future feature types here
+# The following coderefs exist in a hash for each feature type defined
+our %num_form = (
+	privative => sub {
+		return 1 if $_[0];
+		return undef;
+	},
+	binary =>sub {
+		my $value = shift;
+		# Text values
+		return 0 if ($value eq '-');
+		return 1 if ($value eq '+');
+		# If not given a text value
+		return 1 if ($value);
+		return 0;
+	},
+	scalar => sub {
+		return $_[0]; # Nothing happens to scalars
+	},
+	node => sub {
+		return undef if ref($_[0]) ne 'HASH'; # Nodes should be hashrefs
+		return $_[0];
+	}
+);
 
 sub number_form {
 	my $self = shift;
 
 	# Check number of arguments
-	return err("Not enough arguments") if ($#_ < 1);
+	return err("Not enough arguments to number_form") if ($#_ < 1);
 
 	# Otherwise, take your args
 	my $feature = shift;
 	my $value = shift;
-	my $type = $self->type($feature); # for speed: avoid repeatedly calling the type method
 	
 	# Return bad features
-	return undef unless $self->feature($feature);
+	my $ref = $self->feature($feature) or return undef;
 
 	# undef is always valid
 	# '*' is always a synonym for undef
@@ -563,8 +574,7 @@ sub number_form {
 	return undef if ($value eq '*');
 
 	# Otherwise, pass processing to the appropriate coderef
-	no strict 'refs';
-	return &${$type . '_num'}($value);
+	return &{$num_form{$ref->{type}}}($value);
 } # end number_form 
 
 =head2 text_form
@@ -578,15 +588,15 @@ feature given in the first argument. The translations are:
 
 =item *
 
-Any undefined value returns '*'.
+Any undefined value or the string '*' returns '*'.
 
 =item *
 
-B<privative> features return '*' if undef (as above), and '' if defined.
+B<privative> features return '*' if undef or logically false, otherwise '' (an empty string).
 
 =item *
 
-B<binary> features return '+' if true, '-' if false, and '*' if
+B<binary> features return '+' if true, '-' if false or equal to '-', and '*' if
 undefined.
 
 =item *
@@ -604,37 +614,47 @@ B<node> features behave the same as privative features in this function.
 
 # Code references
 
-our $privative_text = sub {
-	return '' if shift;
-	return '*';
-};
-
-our $binary_text = sub {
-	return '+' if shift;
-	return '-';
-};
-
-our $scalar_text = sub {
-	return shift;
-};
-
-our $node_text = $privative_text;
-	
+our %text_form = (
+	privative => sub {
+		return '';
+	},
+	binary => sub {
+		return '+' if shift;
+		return '-';
+	},
+	scalar => sub {
+		return shift;
+	},
+	node => sub {
+		return '';
+	}
+);
 
 sub text_form {
 	my $self = shift;
+
+	# Check number of arguments
+	return err("Not enough arguments to text_form") if ($#_ < 1);
+
+	# Otherwise, take your args
 	my $feature = shift;
 	my $value = shift;
-	my $type = $self->type($feature);
+	
+	# Return bad features
+	my $ref = $self->feature($feature) or return undef;
 
-	return '*' if (not defined($value)); # Good for all types
-	no strict 'refs';
-	return &${$type . '_text'};
+	# first mash through number_form
+	$value = $self->number_form($feature, $value);
+	# '*' is always a synonym for undef
+	return '*' if (not defined($value));
+
+	return &{$text_form{$ref->{type}}}($value);
 } # end text_form
 
 # A very short error writer
 sub err {
 	carp shift if warnings::enabled();
+	return undef;
 } # end err
 
 1;
@@ -663,16 +683,18 @@ is:
 	 +-vocoid privative
 	 +-nasal privative
 	 +-lateral privative
+	 +-continuant binary
 	 +-Laryngeal
 	 |  |
 	 |  +-spread privative
 	 |  +-constricted privative
 	 |  +-voice privative
+	 |  +-ATR binary
 	 |
-	 +-OralCavity
+	 +-Place
 	    |
-	    +-continuant privative
-		+-Cplace
+	    +-pharyngeal privative
+		+-Oral
 		   |
 		   +-labial privative
 		   +-Lingual

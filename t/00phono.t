@@ -1,19 +1,56 @@
 #!/usr/bin/perl
 
+use strict;
 use warnings;
-no warnings 'uninitialized';
-use Test;
+use Test::More tests => 15;
 use Carp;
 
-BEGIN { plan tests => 7 };
+# Test 1
+# Load the module
+use_ok('Lingua::Phonology');
 
-# Test 0
-eval { require warnings::register; return 1 };
-ok($@, '');
+# test 2
+# new() as class method
+my $phono = new Lingua::Phonology;
+ok(UNIVERSAL::isa($phono, 'Lingua::Phonology'), 'new() as a class method');
 
-# Test 1, the general test
-eval { require Lingua::Phonology; return 1 };
-ok($@, '');
+# test 3
+# as an object method
+my $nother = $phono->new();
+ok(UNIVERSAL::isa($phono, 'Lingua::Phonology'), 'new() as an object method');
+
+# tests 4 through (3 + 2*(keys %methods))
+# test the get/set sub-objects
+# methods to test in method => class sets
+my %methods = ( 
+	features => 'Lingua::Phonology::Features',
+	symbols => 'Lingua::Phonology::Symbols',
+	rules => 'Lingua::Phonology::Rules',
+	syllable => 'Lingua::Phonology::Syllable',
+);
+for (keys %methods) {
+	# Test that the methods fetch the correct objects
+	my $test = $phono->$_;
+	ok(UNIVERSAL::isa($test, $methods{$_}), "get $_");
+
+	# test that the methods set the correct objects
+	my $other_test = $nother->$_;
+	$phono->$_($other_test);
+	is($phono->$_, $nother->$_, "set $_");
+} # end for
+
+# test getting segments
+my $test = $phono->segment;
+ok(UNIVERSAL::isa($test, 'Lingua::Phonology::Segment'), "get segment");
+
+# test equivalencies btwn sub-objects
+# start with a new object
+$phono = new Lingua::Phonology;
+is($phono->symbols->features, $phono->features, 'dependency btwn features and symbols');
+is($phono->segment->featureset, $phono->features, 'dependency btwn features and segment');
+is($phono->segment->symbolset, $phono->symbols, 'dependency btwn symbols and segment');
+
+=begin
 
 # Test 2, make sure you can load default features
 eval {
@@ -69,15 +106,15 @@ $onset_if = sub {
 };
 $onset = sub {
 	$_[0]->onset(1); 
-	adjoin('SYLLABLE', $_[1], $_[0]);
+	adjoin('SYLL', $_[1], $_[0]);
 };
 $rules->add_rule(Onset => { where => $onset_if, do => $onset });
 
 # Assign syllable codas
-$coda_if = sub { $_[-1]->nucleus && not $_[0]->SYLLABLE };
+$coda_if = sub { $_[-1]->nucleus && not $_[0]->SYLL };
 $coda = sub {
 	$_[0]->coda(1);
-	adjoin('SYLLABLE', $_[-1], $_[0]);
+	adjoin('SYLL', $_[-1], $_[0]);
 };
 $rules->add_rule(Coda => { where => $coda_if, do => $coda });
 
@@ -102,7 +139,7 @@ $rules->add_rule(FinalLowering => { tier => 'aperture',
 $dissim_if = sub { $_[0]->nasal eq $_[1]->nasal };
 $dissim = sub { $_[0]->delink('nasal') };
 $rules->add_rule( NasalDissimilation => { tier => 'nasal',
-										   domain => 'SYLLABLE',
+										   domain => 'SYLL',
 										   direction => 'rightward',
 										   where => $dissim_if,
 										   do => $dissim
@@ -122,7 +159,7 @@ $rules->persist('Redundancy');
 $rules->order('Nucleus', 'Onset', 'Coda', 'HeightHarmony', 'FinalLowering', 'NasalDissimilation', 'Deletion', 'Insertion');
 $rules->apply_all(\@word);
 
-ok(join('', $symbols->spell(@word)), 'bunirn@');
+ok(join('', $symbols->spell(@word)), 'bunidn@');
 
 sub redundancy {
 	my $seg = $_[0];
@@ -137,8 +174,8 @@ sub redundancy {
 
 	# Syllable stuff
 	$seg->Rime(1) if ($seg->nucleus and not $seg->Rime);
-	$seg->SYLLABLE(1) if ($seg->Rime and not $seg->SYLLABLE);
-	$seg->SYLLABLE(1) if ($seg->onset and not $seg->SYLLABLE);
+	$seg->SYLL(1) if ($seg->Rime and not $seg->SYLL);
+	$seg->SYLL(1) if ($seg->onset and not $seg->SYLL);
 
 #	print $symbols->spell(@_), "\n";
 } # end redundancy
@@ -161,3 +198,5 @@ sub adjoin {
 
 	$seg2->value_ref($feature, $seg1->value_ref($feature));
 } # end join
+
+=cut

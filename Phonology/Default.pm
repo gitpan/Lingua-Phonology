@@ -20,26 +20,21 @@ use warnings;
 use Carp;
 use File::Basename;
 use File::Spec::Functions;
-require Exporter;
-our @ISA = qw/Exporter/;
-our @EXPORT = qw/open_default/;
 
-our $VERSION = 0.1;
+our $VERSION = 0.11;
 
 =head1 FUNCTIONS
 
-=head2 open_default
+=head2 open
 
 Opens a default file in the same directory that Lingua::Phonology::* is
 installed to. Takes one argument, the "suffix" for the default file.
 Default files should be named in the format 'default.*', where the star is
 replaced by the suffix.
 
-This function is exported by default.
-
 =cut
 
-sub open_default {
+sub open {
 	my $filename = 'default.' . shift;
 	open my($fh), catfile(dirname(__FILE__), $filename) or return carp "Couldn't open $filename: $!";
 	return $fh;

@@ -21,7 +21,7 @@ isn't desirable for some situations.
 use strict;
 use Carp;
 
-our $VERSION = 0.1;
+our $VERSION = 0.11;
 
 =head1 METHODS
 
