@@ -30,10 +30,10 @@ node. However, the assignment of values to features is not handled by this
 module--that's the job of Lingua::Phonology::Segment.
 
 Lingua::Phonology::Features also recognizes multiple types of features.
-Features may be privative (which means that their legal values are either true or undef),
-binary (which means they may be true, false, or undef), or scalar (which
-means that their legal value may be anything). You can freely mix different
-kinds of features into the same set of features.
+Features may be privative (which means that their legal values are either true
+or undef), binary (which means they may be true, false, or undef), or scalar
+(which means that their legal value may be anything). You can freely mix
+different kinds of features into the same set of features.
 
 Finally, while this module provides a full set of methods to add and delete
 features programmatically, it also provides the option of reading feature
@@ -47,10 +47,14 @@ use strict;
 use warnings;
 use warnings::register;
 use Carp;
-use Lingua::Phonology::Default;
 
-our $VERSION = 0.11;
+our $VERSION = 0.2;
 
+# Get Graph if present
+our $GRAPH;
+BEGIN {
+	$GRAPH = eval 'use Graph; 1';
+}
 
 =head1 METHODS
 
@@ -113,6 +117,12 @@ Example:
 	$features->add_feature( anterior => { type => 'binary' },
 	                        distributed => { type => 'binary' });
 	$features->add_feature( Coronal => { type => 'node', child => ['anterior', 'distributed']});
+
+B<WARNING>: The following feature names are used by Lingua::Phonology::Rules
+and should not be included as part of user feature sets: C<BOUNDARY, _RULE,
+INSERT_RIGHT, INSERT_LEFT>. Also, the features C<SYLL, Rime, onset, nucleus,
+coda, sonority> are used by Lingua::Phonology::Syllable. They may be defined as
+part of a user feature set, but their original definitions may be overwritten.
 
 =cut
 
@@ -190,6 +200,21 @@ sub feature {
 	return $self->{$feature} if exists($self->{$feature});
 	return err("No such feature '$feature'");
 } # end feature
+
+=head2 feature_exists 
+
+Given the name of the feature, returns a simple truth value indicating whether
+or not any such feature with that name currently exists. Unlike feature(), this
+method never gives an error, and does not return the feature reference on
+success. This can be used by programs that want to quickly check for the
+existence of a feature without the possibility of errors.
+
+=cut
+
+sub feature_exists {
+	my $self = shift;
+	return exists $self->{$_[0]};
+}
 
 =head2 drop_feature
 
@@ -280,7 +305,8 @@ sub loadfile {
 		open $file, $file or return err("Couldn't open $file: $!");
 	}
 	else {
-		$file = Lingua::Phonology::Default::open('features');
+		# $file = Lingua::Phonology::Default::open('features');
+		$file = 'DATA';
 	} # end if/else
 
 	my (%children, %symbols);
@@ -299,8 +325,15 @@ sub loadfile {
 	for (keys(%children)) {
 		$self->add_child($_, @{$children{$_}});
 	} # end for
+	
+	if ($file eq 'DATA') {
+		seek $file, 0, 0;
+	}
+	else {
+		close $file;
+	}
+	return 1;
 
-	close $file;
 } # end loadfile
 
 =head2 children
@@ -449,6 +482,38 @@ sub drop_parent {
 	} # end for
 	return $self->feature($child);
 } # end drop_parent
+
+=head2 graph
+
+Takes no arguments. Returns an object in class Graph indicating the structure
+of the current Lingua::Phonology::Features object. You may use this graph for
+printing or other analysis.
+
+You must have the Graph module installed for this function to work. If you do
+not have Graph installed, you will get an error.
+
+=cut
+
+sub graph {
+	# Bail if we don't have Graph
+	if (not $GRAPH) {
+		carp "Can't call graph: Graph module not available";
+		return undef;
+	}
+
+	my $self = shift;
+
+	my $g = new Graph;
+	for my $feature (keys %$self) {
+		$g->add_vertex($feature);
+		$g->set_attribute('type', $feature, $self->type($feature));
+		for ($self->children($feature)) {
+			$g->add_edge($feature, $_);
+		}
+	}
+
+	return $g;
+}
 
 =head2 type
 
@@ -753,3 +818,49 @@ This module is free software. You can distribute and/or modify it under the
 same terms as Perl itself.
 
 =cut
+
+__DATA__
+
+# Definition of true features, concerned with articulation of segments
+ROOT		node		sonorant approximant vocoid nasal lateral continuant Laryngeal Place
+sonorant	privative
+approximant	privative
+vocoid		privative
+nasal		privative
+lateral		privative
+continuant	binary
+
+Laryngeal	node		spread constricted voice ATR
+spread		privative
+constricted	privative
+voice		privative
+ATR			binary
+
+Place		node		pharyngeal Oral
+pharyngeal	privative
+
+Oral		node		labial Lingual Vocalic
+labial		privative
+
+Lingual		node		Coronal dorsal
+dorsal		privative
+
+Coronal		node		anterior distributed
+anterior	binary
+distributed	binary
+
+Vocalic		node		Vplace aperture tense
+aperture	scalar
+tense		binary
+Vplace		node		labial Lingual
+
+# Definition of syllable-related features, used for parsing syllables
+# These aren't truly heirarchical, to allow for proper domaining
+SON			scalar
+SYLL		scalar
+Rime		privative
+onset		privative
+nucleus		privative
+coda		privative
+
+__END__

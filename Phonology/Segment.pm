@@ -46,7 +46,7 @@ use warnings::register;
 use Carp;
 use Lingua::Phonology::Features;
 
-our $VERSION = 0.11;
+our $VERSION = 0.2;
 
 =head1 METHODS
 
@@ -169,31 +169,24 @@ To delete a node, use the method L<"delink"> instead.
 
 =cut
 
-sub hash_deref {
-	my $hash = shift;
-	if (ref($hash) eq 'SCALAR') {
-		return $$hash;
-	}
-	elsif (ref($hash) eq 'HASH') {
-		for (keys %$hash) {
-			$hash->{$_} = hash_deref($hash->{$_});
-		}
-	}
-	return $hash;
-} #end hash_deref
-
 sub value {
 	my $self = shift;
-	my $return = $self->value_ref(@_); # Pass straight to value_ref
-
-	# Avoid tripping over undefs
-	no strict 'refs';
-	undef($$return) if not defined ($return);
-
-	# Return a hashref if that's what we've got, otherwise the value
-	return hash_deref($return) if (ref($return) eq 'HASH');
-	return $$return;
+	return _deref($self->value_ref(@_));
 } # end value
+
+sub _deref {
+	my ($ref, $code, $feature) = @_;
+	$$ref = undef if not ref $ref;
+	$code = sub { $_[1] } if not $code;
+
+	if (ref($ref) eq 'SCALAR' || ref($ref) eq 'REF') {
+		return &$code($feature, $$ref);
+	}
+	elsif (ref($ref) eq 'HASH') {
+		%$ref = map { $_ => _deref($ref->{$_}, $code, $_) } keys %$ref;
+	}
+	return $ref;
+} #end _deref
 
 =head2 value_text
 
@@ -206,9 +199,7 @@ this conversion see L<features/"number_form">.
 
 sub value_text {
 	my $self = shift;
-	my $return = $self->value(@_);
-	return $self->{FEATURES}->text_form($_[0], $return) unless ref($return);
-	return $return;
+	return _deref($self->value_ref(@_), sub { $self->{FEATURES}->text_form(@_) }, $_[0]);
 } # end value_text
 
 =head2 value_ref
@@ -270,7 +261,7 @@ value() instead.
 
 =cut
 
-our $term_handler = sub {
+sub _term_handler {
 	my ($self, $feature, $value) = @_;
 
 	# If we have a plain scalar ref, assign it directly
@@ -297,10 +288,10 @@ our $term_handler = sub {
 
 	} # end else
 
-}; # end $term_handler
+} # end $term_handler
 		
 # Handle nodes
-our $node_handler = sub {
+sub _node_handler {
 	my ($self, $featureref, $value) = @_;
 
 	# Make sure you're given a hashref
@@ -310,46 +301,36 @@ our $node_handler = sub {
 		# Assign values to all children
 		$self->value_ref($child, $value->{$child}) if exists($value->{$child});
 	} # end for
-}; # end $node_handler
+} # end $node_handler
 		
 sub value_ref {
 	my $self = shift;
 	my $feature = shift; # A string name of a feature
-	my $featureref = $self->{FEATURES}->feature($feature); # The type of the features
+	my $featureref = $self->{FEATURES}->feature($feature) or return undef;
 
-	# Check that the feature is valid
-	return undef if not $featureref;
+	# Node or terminal feature?
+	if ($featureref->{type} eq 'node') {
+		# Set values
+		$self->_node_handler($featureref, shift()) if @_;
 
-	# If the third argument exists, set the value to that
-	if (scalar(@_)) {
-		my $value = shift; # A string or numeric value to be set, or a reference
-
-		# Node or terminal feature?
-		if ($featureref->{type} eq 'node') {
-			&$node_handler($self, $featureref, $value);
-		} # end if
-		else {
-			&$term_handler($self, $feature, $value);
-		} # end else
-				
-	} # end if
-
-	# Return the current feature value
-	# straightforward for non-nodes
-	if ($featureref->{type} ne 'node') {
-		return $self->{VALUES}->{$feature};
-	} # end if
-
-	# For nodes, build a hash
-	else {
+		# Build return hashref
 		my $hashref = {};
 		for my $child ($self->{FEATURES}->children($feature)) {
 			my $val = $self->value_ref($child);
-			$hashref->{$child} = $val if (defined($val));
+			$hashref->{$child} = $val if defined $val;
 		} # end for
-		return $hashref if (keys(%$hashref));
+		return $hashref if keys %$hashref;
 		return undef; # if the hash has no keys
+	} # end if
+
+	else {
+		# Set values
+		$self->_term_handler($feature, shift()) if @_;
+
+		# Return value
+		return $self->{VALUES}->{$feature};
 	} # end else
+				
 } # end value_ref
 
 =head2 delink
@@ -403,7 +384,7 @@ sub delink {
 Takes no arguments. Returns a hash with feature names as its keys and 
 feature values as its values. The feature names present in the hash will
 be those that have defined values for the segment, or those features that
-were explicitly set to be undef (as opposed to being L<"delink">ed).
+were explicitly set to be undef (as opposed to being C<delink>ed).
 
 =cut
 
@@ -471,13 +452,10 @@ sub AUTOLOAD {
 	my $feature = $AUTOLOAD;
 	$feature =~ s/.*:://;
 
-	return undef unless ($_[0]->featureset->feature($feature));
-	
 	# Compile functions which are features
 	eval qq! sub $feature {
 		my \$self = shift;
-		\$self->value_ref($feature, shift) if \@_;
-		return \$self->value($feature);
+		\$self->value($feature, \@_);
 		} # end sub
 	!;
 

@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use Test::More tests=>50;
+use Test::More tests => 62;
 
 BEGIN {
 	use_ok('Lingua::Phonology::Rules');
@@ -28,7 +28,8 @@ my $testrule = {
 	direction => 'leftward',
 	filter => sub {},
 	where => sub {},
-	do => sub {}
+	do => sub {},
+	result => sub {}
 };
 my $setrule = {
 	tier => 'new tier',
@@ -36,9 +37,10 @@ my $setrule = {
 	direction => 'rightward',
 	filter => sub {},
 	where => sub {},
-	do => sub {}
+	do => sub {},
+	result => sub {}
 };
-my @methods = ('tier', 'domain', 'direction', 'filter', 'where','do');
+my @methods = ('tier', 'domain', 'direction', 'filter', 'where','do','result');
 
 # test assigning the rule
 ok($rules->add_rule(test => $testrule), 'add via add_rule');
@@ -54,6 +56,9 @@ ok((not $rules->add_rule(fail => { where => 'no way' })), 'add_rule failure on b
 
 # failure on bad do
 ok((not $rules->add_rule(fail => { do => 'not even' })), 'add_rule failure on bad do');
+
+# failure on bad result
+ok((not $rules->add_rule(fail => { result => 'not this either' })), 'add_rule failure on bad result');
 
 # test the various get/set methods
 for (@methods) {
@@ -103,9 +108,11 @@ $rules->add_rule(
 	}
 );
 # test applying the rule
-# WORKING ON SAME OBJECT FIXXXXX ME
 ok($rules->left(\@word), 'apply leftward coronal dissimilation');
 ok($word[3]->Coronal, 'test result of rule');
+
+# Test count() once here for convenience
+is $rules->count, 2, 'test count() after apply()';
 
 # reset the word
 @word = $phono->symbols->segment('b','u','d','i','n','i');
@@ -155,11 +162,39 @@ $rules->add_rule(
 ok($rules->filters(\@word), 'apply filtered voicing');
 is($word[2]->voice, 1, 'result of filtered voicing');
 
+# test for result that fails
+$rules->add_rule(
+	results => {
+		where => sub { $_[0]->vocoid },
+		do => sub { $_[0]->delink('labial') },
+		result => sub { $_[0]->labial }
+	}	
+);
+ok($rules->results(\@word), 'apply result rounding');
+is($word[3]->labial, 1, 'result of result rounding');
+
+# test for result that succeeds
+$word[2]->delink('voice');
+$rules->add_rule(
+	results2 => {
+		filter => sub { not $_[0]->sonorant },
+		do => sub { $_[0]->voice(1) },
+		result => sub { 1 }
+	}
+);
+$rules->results2(\@word);
+TODO: {
+	local $TODO = "\n  This test expected to fail except when the Whatif module is available. See README for details.";
+	ok(($word[2]->voice), 'result of result voicing');
+}
+
 # where and do have been implicit in every rule so far, so we won't test them
 # separately
 
 # test failure of apply()
-ok((not $rules->apply('nonesuch', \@word)), 'failure of apply()');
+ok((not $rules->apply('nonesuch', \@word)), 'failure of apply() on bad rule name');
+ok((not $rules->apply('filters', 0)), 'failure of apply() on bad word');
+ok((not $rules->apply('filters', [0,0,1,undef])), 'failure of apply() on bad segments');
 
 # test persist
 # fortunately, these don't have to be real rule names (is this a bug or a feature?)
@@ -185,3 +220,6 @@ $rules->persist('scramble');
 $rules->order('unscramble');
 ok($rules->apply_all(\@word), 'test apply_all');
 is($word[0]->voice, undef, 'results of apply_all');
+
+# test count() after apply_all()
+is ref($rules->count), 'HASH', 'test count() after apply_all';

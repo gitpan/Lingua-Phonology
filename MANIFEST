@@ -6,9 +6,7 @@ Makefile.PL
 Phonology.pm
 test.features
 test.symbols
-Phonology/Default.pm
-Phonology/default.features
-Phonology/default.symbols
+Phonology/Boundary.pm
 Phonology/Features.pm
 Phonology/Functions.pm
 Phonology/PseudoSegment.pm

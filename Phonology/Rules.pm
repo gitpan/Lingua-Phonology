@@ -19,65 +19,28 @@ phonological rules.
 
 =head1 DESCRIPTION
 
-This module allows for the creation of linguistic rules, and the
-application of those rules to "words" of Segment objects. To achieve 
-maximum flexibility, this module simply provides a framework for defining 
-the conditions and cyclicity of rules. The actual operations of the rule 
-is defined by the user and passed in to Rules as a code reference. This
-allows the user to define any sort of rule that he wants and makes it easy
-to use outside subroutines in the creation of rules.
+This module allows for the creation of linguistic rules, and the application of
+those rules to "words" of Segment objects. You, the user, add rules to a Rules
+object, defining various parameters and code references that actually perform
+the guts of the rule. Lingua::Phonology::Rules will take care of the guts of
+applying and creating rules.
 
-Lingua::Phonology::Rules is flexible and powerful enough to handle any 
-sequential type of rule system. It cannot handle Optimality Theory-style
-processes, because those require a fundamentally different kind of 
-algorithm.
-
-=cut
-
-use strict;
-use warnings::register;
-use Carp;
-use Lingua::Phonology::Segment;
-use Lingua::Phonology::PseudoSegment;
-
-our $VERSION = 0.11;
-
-=head1 METHODS
-
-=head2 new
-
-Returns a new Lingua::Phonology::Rules object. This method accepts no 
-arguments.
-
-=cut
-
-sub new {
-	my $proto = shift;
-	my $class = ref($proto) || $proto;
-	my $self = { RULES => { },
-				 ORDER => [ ],
-				 PERSIST => [ ] };
-	bless ($self, $class);
-	return $self;
-} # end new
-
-=head2 add_rule
-
-Adds one or more rules to the list. Takes a series of key-value pairs, where
-the keys are the names of rules to be added, and the values are hashrefs. The
-following are accepted as keys for the value hashref:
+The rules you create may have the following parameters. This is just a brief
+description of the parameters--a discussion of their effect is in the
+L<"WRITING RULES"> section.
 
 =over 4
 
 =item *
 
-B<tier> - defines the tier on which the rule applies. Must be the name of
-a feature in the feature set for the segments of the word you pass in.
+B<domain> - defines the domain within which the rule applies. This should be
+the name of a feature in the featureset of the segments which the rule is
+applied to.
 
 =item *
 
-B<domain> - defines the domain within which the rule applies. Must also be
-the name of a feature.
+B<tier> - defines the tier on which the rule applies. Must be the name of a
+feature in the feature set for the segments of the word you pass in.
 
 =item *
 
@@ -101,7 +64,69 @@ always true.
 B<do> - defines the action to take when the C<where> condition is met. Must be
 a code reference. If no value is given, does nothing.
 
+=item * 
+
+B<result> - EXPERIMENTAL. Defines a condition that must be true after the C<do>
+code has applied. Must be a code reference that returns a truth value. B<NOTE>:
+This parameter depends on the module Whatif (available from CPAN), and will
+behave differently if this module is not present. See L<"Using result">.
+
 =back
+
+Lingua::Phonology::Rules is flexible and powerful enough to handle any 
+sequential type of rule system. It cannot handle Optimality Theory-style
+processes, because those require a fundamentally different kind of 
+algorithm.
+
+=cut
+
+use strict;
+use warnings::register;
+use Carp;
+use Data::Dumper;
+use Lingua::Phonology::Segment;
+use Lingua::Phonology::PseudoSegment;
+use Lingua::Phonology::Boundary;
+BEGIN {
+	eval 'sub whatif (&;$) {}' if not eval 'use Whatif; 1';
+}
+
+our $VERSION = 0.2;
+
+=head1 METHODS
+
+=head2 new
+
+Returns a new Lingua::Phonology::Rules object. This method accepts no 
+arguments.
+
+=cut
+
+sub new {
+	my $proto = shift;
+	my $class = ref($proto) || $proto;
+	my $self = { RULES => { },
+				 BOUND => Lingua::Phonology::Boundary->new(new Lingua::Phonology::Features),
+				 ORDER => [ ],
+				 PERSIST => [ ],
+				 COUNT => 0 };
+	bless ($self, $class);
+	return $self;
+} # end new
+
+=head2 add_rule
+
+Adds one or more rules to the list. Takes a series of key-value pairs, where
+the keys are the names of rules to be added, and the values are hashrefs. Any of the parameters mentioned above may be used, so a single rule has the following maximal structure:
+
+	'Name of Rule' => {
+		domain => 'some_feature',
+		tier => 'some_feature',
+		direction => 'rightward', # Can only be 'rightward' or 'leftward'
+		where => \&foo,
+		do => \&bar
+		result => \&baz
+	}
 
 A detailed explanation of how to use these to make useful rules is in 
 L<WRITING RULES>. A typical call to add_rule might look like what 
@@ -109,12 +134,15 @@ follows. Assume that 'nasal' and 'SYLLABLE' are defined in the feature set
 you're using, and that nasalized() and denasalize() are subroutines 
 defined elsewhere.
 
-	$rules->add_rule( Denasalization => { tier => 'nasal',        # A feature name
-	                                       domain => 'SYLLABLE',  # Another feature name
-										   direction => 'rightward',
-										   where => \&nasalized,  # A code reference
-										   do => \&denasalize     # Another code reference
-	});
+	$rules->add_rule(
+		Denasalization => {
+			tier => 'nasal',
+			domain => 'SYLLABLE',
+			direction => 'rightward',
+			where => \&nasalized,
+			do => \&denasalize
+		}
+	);
 
 This method returns true if all rules were added successfully, otherwise false;
 
@@ -125,6 +153,7 @@ our %property = ( where => 1,
 			  do	=> 1,
 			  tier  => 1,
 			  filter => 1,
+			  result => 1,
 			  domain => 1,
 			  direction => 1 );
 
@@ -153,7 +182,9 @@ sub add_rule {
 		# Set defaults for where and do
 		$params->{where} = sub {1} if not $params->{where}; # Default to always true
 		$params->{do} = sub {} if not $params->{do}; # Default to nothing
-		for ('filter','where','do') {
+
+		# Check that we have code references where we need them
+		for ('filter','where','do','result') {
 			if ($params->{$_}) {
 				if (ref($params->{$_}) ne 'CODE') {
 					err("$_ for $rule is not a code reference");
@@ -206,6 +237,10 @@ See below.
 
 =head2 do
 
+See below.
+
+=head2 result
+
 All of these methods behave identically. They may take one or two 
 arguments. The first argument is the name of a rule. If only one argument
 is given, then these return the property of the rule that they name. If 
@@ -223,183 +258,6 @@ input. Therefore, if you use one of these methods to set a rule property to an
 improper value, you won't find out until you attempt to execute the rule, at
 which point you'll get (potentially fatal) errors.
 
-=cut
-
-# Private functions needed by apply()
-
-# Features we use
-our %features = ( BOUNDARY => { type => 'privative' },
-				  INSERT_RIGHT => { type => 'scalar' },
-				  INSERT_LEFT => { type => 'scalar' },
-				  _NEW => { type => 'privative' },
-				  _RULE => { type => 'scalar' }
-);
-
-# A simplistic func to flatten hashrefs into easily comparable strings
-sub flatten {
-	my $thing = shift;
-	return $thing if ref($thing) ne 'HASH';
-	my $return = '';
-	for (keys(%$thing)) {
-		$return .= flatten($thing->{$_});
-	} # end for
-	return $return;
-} # end if
-	
-# Make a domain
-our $make_domain = sub {
-	my $domain = shift;
-	my @word = @_;
-	my @return = ();
-
-	my $i = 0;
-	while ($i < scalar(@word)) {
-		my @domain = ();
-		push(@domain, $word[$i]);
-
-		# Keep adding segments as long as they are references to the same thing
-		while ($word[$i+1] && flatten($word[$i]->value_ref($domain)) eq flatten($word[$i+1]->value_ref($domain))) {
-			$i++;
-			push (@domain, $word[$i]);
-		} #end while
-
-		push (@return, \@domain);
-		$i++;
-	} # end while
-
-	return @return;
-}; # end $make_domain
-
-# Make tiers
-our $make_tier = sub {
-	my $tier = shift;
-	my (@return, @temp);
-	for (@_) {
-		push (@temp, $_) if (defined($_->value($tier)));
-	} # end for
-
-	# Define pseudo-segments
-	@temp = &$make_domain($tier, @temp);
-	for (@temp) {
-		push (@return, Lingua::Phonology::PseudoSegment->new(@$_));
-	} # end for
-
-	return @return;
-}; # end make_tier
-
-# Readably do the rotations
-our $rightward = sub {
-	push(@_, shift(@_));
-	return @_;
-}; # end rotate
-
-our $leftward = sub {
-	unshift(@_, pop(@_));
-	return @_;
-}; # end rotate
-
-# Return only list elements that have some values set and include
-# INSERT_LEFT and INSERT_RIGHT segments
-our $cleanup = sub {
-	my @return = ();
-	for (@_) {
-		next if not $_;
-		my ($right, $left);
-		if ($left = $_->INSERT_LEFT) {
-			# $left->_NEW(1);
-			push(@return, $left);
-			# $_->delink('INSERT_LEFT');
-		} # end if
-		push (@return, $_);
-		if ($right = $_->INSERT_RIGHT) {
-			# $right->_NEW(1);
-			push(@return, $right);
-			# $_->delink('INSERT_RIGHT');
-		} # end if
-	} # end for
-	# This line is ugly, but the nicer keys($_->all_values) didn't work. WTF?
-	return grep { my %hash = $_->all_values; scalar(keys(%hash)) } @return;
-}; # end cleanup
-
-# Make the fully modified string reconstructible so that $cleanup will put
-# it back how it should be
-our $reconstruct = sub {
-	for (0 .. $#_) {
-		if ($_[$_]->_NEW) {
-			if ($_[$_ - 1]->BOUNDARY) {
-				$_[$_ + 1]->INSERT_LEFT($_[$_]);
-			} # end if
-			else {
-				$_[$_ - 1]->INSERT_RIGHT($_[$_]);
-			} # end else
-		} # end if
-	} # end for
-	return @_;
-}; # end reconstruct
-
-
-# Actually execute the code
-our $execute = sub {
-
-	my $self = shift;
-	my $rule = shift;
-	return if not @_; # What's left of @_ is the segment list
-
-	# Create boundary segments
-	my $bound = Lingua::Phonology::Segment->new( $_[0]->featureset ); 
-	$bound->BOUNDARY(1);
-	push (@_, $bound);
-	unshift (@_, $bound);
-
-	# Get the important properties
-	my $filter = $self->filter($rule);
-	my $where = $self->where($rule);
-	my $do = $self->do($rule);
-	my $dir = $self->direction($rule);
-
-	# Make properties available via _RULE
-	$_->_RULE($self->{RULES}->{$rule}) for (@_);
-
-	# Apply the filter; always allow BOUNDARY segments through
-	@_ = grep { &$filter($_) || $_->BOUNDARY } @_ if $filter;
-
-	# Rotate to starting positions
-	my $next;
-	if ($dir eq 'leftward') {
-		@_ = &$leftward(@_); # We need one extra rotation for leftward
-		$next = $leftward;
-	} # end if
-	else {
-		$next = $rightward;
-	} # end if
-	@_ = &$next(@_);
-
-	# Count the times the rule applies
-	my $count = 0;
-
-	# Iterate over each segment
-	do {
-		# @_ = &$cleanup(@_); # This cleanup only affects the local @_
-		if (&$where(@_)) {
-			&$do(@_);
-			$count++;
-		} # end if
-		# Rotate to the next segment
-		@_ = &$next(@_);
-		
-		# If someone has destroyed our features, put them back before bad
-		# things happen
-		if (not $_[0]->featureset->feature('BOUNDARY')) {
-			$_[0]->featureset->add_feature(%features);
-		}
-	} # end do
-	while (not $_[0]->BOUNDARY);
-
-	# Do final cleanup and reconstruction
-	# &$reconstruct(&$cleanup(@_));
-	return $count;
-}; # end execute
-
 =head2 apply
 
 Applies a rule to a "word". The first argument to this function is the 
@@ -411,14 +269,18 @@ to exploit it, see below in L<WRITING RULES>. Example:
 
 	$rules->apply('Denasalization', \@word); # Word must be an array of Segment objects
 
-As of v.0.1, the return value of apply() is an integer indicating how many
-times the rule applied (i.e. how many times the C<do> property was actually
-executed).
+As of v0.2, the return value of apply() is an array with the modified contents
+of the array that was passed as a reference in the call to apply(). Thus, the
+return value of the rule above, if it were captured, would be the same as the
+contents of C<@word> after apply() was called.
+
+This method will set C<count>, clobbering any earlier value. See L<"count">
+below.
 
 =head2 Applying rules by name
 
 You may also call rule names themselves as methods, in which case the only
-needed arguments are the segments of the word. Thus, the following is
+needed argument is an array reference to the word. Thus, the following is
 exactly identical to the preceding example:
 
 	$rules->Denazalization(\@word);
@@ -430,63 +292,196 @@ instead.
 
 =cut
 
+# Features we use
+our %features = ( BOUNDARY => { type => 'privative' },
+				  INSERT_RIGHT => { type => 'scalar' },
+				  INSERT_LEFT => { type => 'scalar' },
+				  _RULE => { type => 'scalar' }
+);
+
 sub apply {
-	my ($self, $rule, $word) = @_;
+	my ($self, $rule, $orig) = @_;
 
 	return err("No such rule $rule") if not exists($self->{RULES}->{$rule});
-	return 0 if not @$word;
+
+	return err("Bad arguments to apply()") if ref($orig) ne 'ARRAY';
+	return 0 if not @$orig;
 	
 	# Check that we have good segments
-	for (@$word) {
+	for (@$orig) {
 		if (not UNIVERSAL::isa($_, 'Lingua::Phonology::Segment')) {
-			carp "Bad arguments to apply";
-			return 0;
+			return err("Bad arguments to apply()");
 		}
 	}
 	
 	# Assume that all segments share a featureset, and add our pseudo-features to that set
-	my $featureset = $word->[0]->featureset; 
-	$featureset->add_feature(%features);
+	$orig->[0]->featureset->add_feature(%features); 
 	
-	# Count the times the rule applies (to be incremented in &$execute)
-	my $count = 0;
+	# Reset the counter
+	$self->{COUNT} = 0;
 
-	my $tier = $self->tier($rule);
-	# Set up domains and execute on them, if needed
-	if (my $domain = $self->domain($rule)) {
-		my @domains = &$make_domain($domain, @$word);
-		for (@domains) {
-			if ($tier) {
-				$count += &$execute($self, $rule, &$make_tier($tier, @$_));
-			}
-			else {
-				$count += &$execute($self, $rule, @$_);
-			} # end if/else
-		} # end for
-	} #end if
-
-	# If there are no domains specified, simply execute on the whole word
+	# Set up domains, if they exist
+	my @domains = ();
+	if ($self->{RULES}->{$rule}->{domain}) {
+		@domains = _make_domain($self->{RULES}->{$rule}->{domain}, @$orig);
+	}
 	else {
-		if ($tier) {
-			$count += &$execute($self, $rule, &$make_tier($tier, @$word));
+		@domains = ($orig);
+	}
+
+	# Iterate over the domains/segments
+	for (@domains) {
+		# Readability
+		my @word = @$_;
+
+		# Make tiers, if needed
+		if (my $tier = $self->{RULES}->{$rule}->{tier}) {
+			@word = _make_tier($tier, @word);
 		}
-		else { 
-			$count += &$execute($self, $rule, @$word);
-		} # end if/else
-	} # end else
+
+		# Make filters, if needed
+		if (my $filter = $self->{RULES}->{$rule}->{filter}) {
+			@word = grep { &$filter($_) } @word;
+		}
+
+		# Create boundary segments (assume all segs have the same featureset)
+		push (@word, $self->{BOUND});
+		unshift (@word, $self->{BOUND});
+
+		# Make properties available via _RULE
+		$_->_RULE($self->{RULES}->{$rule}) for (@word);
+
+		# Rotate to starting positions
+		my $next;
+		if ($self->{RULES}->{$rule}->{direction} eq 'leftward') {
+			@word = _leftward(@word); # We need one extra rotation for leftward
+			$next = \&_leftward;
+		} # end if
+		else {
+			$next = \&_rightward;
+		} # end if
+		@word = &$next(@word);
+			
+		# Iterate over each segment for where and do
+		while (not $word[0]->BOUNDARY) {
+			if (&{$self->{RULES}->{$rule}->{where}}(@word)) {
+
+				# If we're using result
+				my $result = $self->{RULES}->{$rule}->{result};
+				if ($result) {
+					whatif {
+						&{$self->{RULES}->{$rule}->{do}}(@word);
+						@word = _cleanup(@word); # this is convenient for many reasons
+						die if not &$result(@word);
+						$self->{COUNT}++;
+					};
+				}
+
+				else {
+					# Apply the rule
+					&{$self->{RULES}->{$rule}->{do}}(@word);
+					$self->{COUNT}++;
+				}
+
+				# If the 'do' destroyed our feature(s), put them back
+				if (not $word[0]->featureset->feature_exists('BOUNDARY')) {
+					$word[0]->featureset->add_feature(%features);
+				}
+
+			} # end if
+
+			# Rotate to the next segment
+			@word = &$next(@word);
+			
+		} # end while
+
+	} # end for
 
 	# Clean up the word
-	# These actually affect the output word directly
-	@$word = &$cleanup(@$word);
+	@$orig = _cleanup(@$orig);
 
 	# Remove our temporary feature settings
 	for my $feature (keys(%features)) {
-		$_->delink($feature) for (@$word);
-		$featureset->drop_feature($feature);
+		$_->delink($feature) for (@$orig);
+		$orig->[0]->featureset->drop_feature($feature);
 	} # end for
 
-	return $count;
+	return @$orig;
 } #end if
+
+# A simplistic func to flatten hashrefs into easily comparable strings
+sub _flatten {
+	return $_[0] if ref($_[0]) ne 'HASH';
+	my $return = '';
+	for (keys %{$_[0]}) {
+		$return .= _flatten($_[0]->{$_});
+	} # end for
+	return $return;
+} # end if
+
+# Make a domain
+sub _make_domain ($@) {
+	my $domain = shift;
+	return (\@_) if not $domain;
+	my @return = ();
+
+	my $i = 0;
+	while ($i < scalar(@_)) {
+		my @domain = ();
+		push(@domain, $_[$i]);
+
+		# Keep adding segments as long as they are references to the same thing
+		while ($_[$i+1] && _flatten($_[$i]->value_ref($domain)) eq _flatten($_[$i+1]->value_ref($domain))) {
+			$i++;
+			push (@domain, $_[$i]);
+		} #end while
+
+		push (@return, \@domain);
+		$i++;
+	} # end while
+
+	return @return;
+}
+
+# Make tiers
+sub _make_tier ($@) {
+	my $tier = shift;
+
+	map { Lingua::Phonology::PseudoSegment->new(@$_) }
+	_make_domain $tier, grep { defined($_->value($tier)) }
+	@_;
+}
+
+# Make filters
+sub _make_filter ($@) {
+	my $filter = shift;
+
+	my @return = ();
+	for (0 .. $#_) {
+		push (@return, $_[0]) if &$filter(@_);
+		@_ = _rightward(@_);
+	}
+	return @return;
+}
+
+# Readably do the rotations
+sub _rightward {
+	push(@_, shift(@_));
+	return @_;
+} # end rotate
+
+sub _leftward {
+	unshift(@_, pop(@_));
+	return @_;
+} # end rotate
+
+# Return only list elements that have some values set and include
+# INSERT_LEFT and INSERT_RIGHT segments
+sub _cleanup {
+	grep { defined($_) && $_->all_values }
+	map { ($_->INSERT_LEFT, $_, $_->INSERT_RIGHT) }
+	@_;
+}
 
 # Makes rules appliable by their name
 our $AUTOLOAD;
@@ -541,38 +536,36 @@ part of the current object but which aren't specified in order() or
 persist() are not applied. See L<"order"> and L<"persist"> for details on 
 those methods.
 
-As of v0.1, apply_all() in list context returns a hash whose keys are the
-names of rules, and whose values are the number of times each rule applied.
-In scalar context, it returns the sum of all the times that a rule was
-applied.
+In v0.2, the return value of apply_all() has changed (again). Now, apply_all()
+always returns a hashreference whose keys are the names of rules and whose
+values are the number of times that those rules were applied. This is the same
+thing that count() returns after a call to apply_all(). See L<"count"> below.
 
 =cut
 
 sub apply_all {
 	my ($self, $word) = @_;
-	my %return = ();
+	my %count = ();
 	
 	my @persist = $self->persist; # Only get this once, for speed
 	for ($self->order) {
 		for (@persist) {
-			$return{$_} = $self->apply($_, $word);
+			$self->apply($_, $word);
+			$count{$_} += $self->{COUNT};
 		} # end for
-		$return{$_} = $self->apply($_, $word);
+		$self->apply($_, $word);
+		$count{$_} += $self->{COUNT};
 	} # end for
 
 	# Apply persistent rules one last time before finishing
 	for (@persist) {
-		$return{$_} = $self->apply($_, $word);
+		$self->apply($_, $word);
+		$count{$_} += $self->{COUNT};
 	} # end for
 
-	if (wantarray) {
-		return %return;
-	}
-	elsif (defined wantarray) {
-		my $count;
-		$count += $_ for values %return;
-		return $count;
-	}
+	# Set COUNT to be the hashref
+	$self->{COUNT} = \%count;
+
 } # end sub
 
 =head2 order
@@ -613,6 +606,21 @@ sub persist {
 
 1;
 
+=head2 count
+
+After a call to apply() or apply_all(), this method can be used to find out how
+many times the rule was applied. After apply(), the return value of this
+function will be an integer. Note that the next call to apply() will clobber
+this value, so get it while you can. After apply_all(), the return value of
+this method will be a hash reference, the keys of which are the rules that
+were applied, and the values of which are the times that those rules applied.
+
+=cut
+
+sub count {
+	return $_[0]->{COUNT};
+}
+
 # A very short error writer
 sub err {
 	carp shift if warnings::enabled();
@@ -647,19 +655,29 @@ the executer.
 
 =item *
 
-Executing the rule involves examining every segment in turn and deciding if
-the criteria for applying the rule, defined by the C<where> property, are
-met. If so, the action is performed.  If the direction of the rule is
-specified as "rightward", then the criterion-checking and rule execution
-begin with the leftmost segment and proceed to the right.  If the direction
-is "leftward", the opposite occurs: focus begins on the rightmost segment
-and proceeds to the left.
+Executing the rule involves examining every segment in turn and deciding if the
+criteria for applying the rule, defined by the C<where> property, are met. If
+so, the action defined by C<do> is performed.  If the direction of the rule is
+specified as "rightward", then the criterion-checking and rule execution begin
+with the leftmost segment and proceed to the right.  If the direction is
+"leftward", the opposite occurs: focus begins on the rightmost segment and
+proceeds to the left.
+
+=item *
+
+If a C<result> is specified, after each potential application of the C<do>
+code, the result condition will be checked. If that condition is true, the rule
+application goes on to the next segment. If the result condition is false, then
+the rule is "undone", leaving the input word exactly the way that it was
+before.
 
 =back
 
 The crucial point is that the rule mechanism has focus on one segment at a
 time, and that this focus proceeds across each available segment in turn.
-Criterion checking and execution are done for every segment.
+Criterion checking and execution are done for every segment. According to the
+order given above, C<where> and C<do> are almost the last things to be
+executed, but they're the most fundamental, so we'll examine them first.
 
 =head2 Using 'where' and 'do'
 
@@ -667,46 +685,45 @@ Of course, the actual criteria and execution are done by the coderefs that
 you supply. So you have to know how to write reasonable criteria and
 actions.
 
-Lingua::Phonology::Rules will pass an array of segments to both of the
-coderefs that you give it. This array of segments will be arranged so that
-the segment that currently has focus will be at index 0, the following
-segment will be at 1, and the preceding segment at -1, etc. The ends of the
-"word" (or domain, if you're using domains) are indicated by special
-segments that have the feature BOUNDARY, and no other features.
+Lingua::Phonology::Rules will pass an array of segments to both of the coderefs
+that you give it. This array of segments will be arranged so that the segment
+that currently has focus will be at index 0, the following segment will be at
+1, and the preceding segment at -1, etc. The ends of the "word" (or domain, if
+you're using domains) are indicated by special segments that have the feature
+BOUNDARY, and no other features. (During the execution of your rule, the
+feature 'BOUNDARY' will be added to your feature set, but it will be dropped at
+the end. Therefore, it's a bad idea to have BOUNDARY be a normal part of your
+featureset.)
 
-For example, let's say we had applied a rule to a simple four-segment word
-like in the following example:
+For example, let's say we had applied a rule to a simple four-segment word as
+in the following example:
 
-	# Assume you have a Symbols object $symbols with the default symbol set
-	# loaded
-
-	$b = $symbols->new_segment('b');
-	$a = $symbols->new_segment('a');
-	$n = $symbols->new_segment('n');
-	$d = $symbols->new_segment('d');
-
-	# Now, let's apply some rules to this word
-	$rules->apply('MyRule', \($b, $a, $n, $d));
+	$rules->apply('MyRule', [$b, $a, $n, $d]);
 
 If MyRule applies rightward and there are no tiers or domains, then the
-contents of @_ will be as follows on each of the four turns. (Boundary
-segments are indicated by '$$'):
+contents of @_ will be as follows on each of the four turns. Boundary
+segments are indicated by '_B_':
 
-	         $_[-2]   $_[-1]   $_[0]   $_[1]   $_[2]   etc...
+	         $_[-2]   $_[-1]   $_[0]   $_[1]   $_[2]   $_[3]
 	
-	turn 1    $$       $$       $b      $a      $n
-	turn 2    $$       $b       $a      $n      $d
-	turn 3    $b       $a       $n      $d      $$
-	turn 4    $a       $n       $d      $$      $$
+	turn 1    _B_      _B_      $b      $a      $n      $d
+	turn 2    _B_      $b       $a      $n      $d      _B_
+	turn 3    $b       $a       $n      $d      _B_     _B_
+	turn 4    $a       $n       $d      _B_     _B_     $b
 
 This makes it easy and intuitive to refer to things like 'current segment'
 and 'preceding segment'. The current segment is $_[0], the preceding one is
 $_[-1], the following segment is $_[1], etc.
 
-(Yes, it's true that if the focus is on the first segment of the word,
-$_[-3] refers to the last segment of the word. So be careful. Besides, you
-should rarely, if ever, need to refer to something that far away. If you
-think you do, then you're probably better off using a tier.)
+(Yes, it's true that if the focus is on the first segment of the word, $_[-3]
+refers to the last segment of the word. So be careful. Besides, you should
+rarely, if ever, need to refer to something that far away. If you think you do,
+then you're probably better off using a tier or filter.)
+
+(Also, you should know that the boundary segments themselves are impervious to
+any attempt to alter or delete them. However, there is nothing that prevents
+you from setting some I<other> segment to be a boundary, which will do very
+strange and probably undesirable things. Don't say I didn't warn you.)
 
 Using our same example, then, we could write a rule that devoices final
 consonants very easily.
@@ -736,6 +753,49 @@ clear out any segments that have no features on them for you.
 As a corollary, if you give segments that have no feature values set as
 input, they will be silently dropped from the output.
 
+=head2 Using domains
+
+Domains change the segments that are visible to your rules by splitting the
+word given into parts.
+
+The value for a domain is the name of a feature. If the domain property is
+specified for a rule, the input word given to the rule will be broken into
+groups of segments whose value for that feature are references to the same
+value. For the execution of the rule, those groups of segments act as
+complete words with their own boundaries. For example:
+
+	@word = $symbols->segment('b','a','r','d','a','m');
+
+	# Syllable 1
+	$word[0]->SYLLABLE(1);
+	$word[1]->SYLLABLE($word[0]->value_ref('SYLLABLE'));
+	$word[2]->SYLLABLE($word[0]->value_ref('SYLLABLE'));
+
+	# Syllable 2
+	$word[3]->SYLLABLE(1);
+	$word[4]->SYLLABLE($word[3]->value_ref('SYLLABLE'));
+	$word[5]->SYLLABLE($word[3]->value_ref('SYLLABLE'));
+
+	# BTW, the preceding can be done a lot easier with the Syllable module.
+
+	# Make a rule to assign codas
+	$rules->add_rule(
+		Coda => {
+			domain => 'SYLLABLE',
+		    where => sub { $_[1]->BOUNDARY },
+			do => sub { $_[0]->coda(1) }\
+		}
+	);
+	
+	$rules->Coda(\@word);
+	# Now both the /r/ and the /m/ are marked as codas
+
+In this example, if we hadn't specified the domain 'SYLLABLE', only the /m/
+would have been marked as a coda, because only the /m/ would have been at a
+boundary. With the SYLLABLE domain, however, the input word is broken up
+into the two syllables, which act as their own words with respect to
+boundaries.
+
 =head2 Using tiers
 
 Many linguistic rules behave transparently with respect to some segments or
@@ -753,48 +813,49 @@ intervening segments. For example, let's say that you have a vowel harmony
 rule that applies across any number of intervening consonants. The best
 solution is to specify that the rule has the tier 'vocoid'. This will cause
 the rule to completely ignore all non-vocoids: non-vocoids won't even
-appear in the array that the rule works on.
+appear in the array that the rule works on. For example:
 
 	# Make a rather contrived word
 	@word = $symbols->segment('b','u','l','k','t','r','i'),
 
-	# Note that if we were doing this without tiers, we would have to
-	# specify $_[5] to see the final /i/ from the /u/. No such nonsense is
-	# necessary when using the 'vocoid' tier, because the only segments
-	# that the rule "sees" are ('u','i').
+Note that if we were doing this without tiers, we would have to specify $_[5]
+to see the final /i/ from the /u/. No such nonsense is necessary when using the
+'vocoid' tier, because the only segments that the rule "sees" are ('u','i').
+Thus, the following rule spreads frontness backwards (though I<why> it does so
+may be less than perfectly obvious to the non-linguist).
 	
-	# If the next segment is front ([-anterior] in the default feature set) . . .
-	$where = sub { not $_[1]->anterior };
-
-	# Then you also become front by copying the following segment's Lingual
-	# values (see the Segment documentation and default feature set if this
-	# makes no sense to you).
-
-	$do = sub { $_[0]->Lingual( $_[1]->value_ref('Lingual') ) };
-
 	# Make the rule, being sure to specify the tier
-	$rules->add_rule( VowelHarmony => { tier => 'vocoid',
-	                                    direction => 'rightward',
-										where => $where,
-										do => $do });
+	$rules->add_rule(
+		VowelHarmony => {
+			tier => 'vocoid',
+	        direction => 'rightward',
+			where => sub { $_[1]->Coronal },
+			do => sub { $_[0]->Lingual( $_[1]->value_ref('Lingual') ) }
+		}
+	);
 	
 	# Apply the rule and print out the result
 	$rules->VowelHarmony(\@word);
 	print $symbols->spell(@word); # prints 'bylktri'
 
 Tiers include one more bit of magic. When you define a tier, if consecutive
-segments that are defined on that tier are references to the same value,
-Lingua::Phonology::Rules will combine them into one segment before going to
-execution. Once such a segment is constructed, you can assign or test
-values for the tier feature itself, or any features that are children of
-the tier (if the tier is a node). Assigning or testing other values will
-generally fail and return undef, but it I<may> succeed if the return values
-of the assignment or test are the same for every segment. Be careful.
+segments that are defined on that tier have references to the same value for
+that tier, Lingua::Phonology::Rules will combine them into one segment before
+going to execution. Once such a segment is constructed, you can assign or test
+values for the tier feature itself, or any features that are children of the
+tier (if the tier is a node). Assigning or testing other values will generally
+fail and return undef, but it I<may> succeed if the return values of the
+assignment or test are the same for every segment. Be careful.
 
 This (hopefully) makes linguistic sense--if you're using the tier
 'SYLLABLE', what you're really interested in are interactions between whole
 syllables. So that's what you see in your rule: "segments" that are really
 syllables and include all of the true segments inside them.
+
+When using domains and tiers together, the word is broken up into domains
+I<before> the tier is applied. Thus, two segments which might otherwise
+have been combined into a single pseudo-segment on a tier will not be
+combined if they fall into different domains.
 
 =head2 Using filters
 
@@ -819,14 +880,11 @@ no magical combination of segments with a tier.
 
 =item *
 
-Unlike a C<where> property, a filter code reference only gets one segment
-at a time. Therefore, you can't refer to adjacent segments when you're
-writing the code reference for a filter. Also, the rule algorithm takes the
-filter and goes over the whole word with it once, picking out those
-segments that pass through the filter. It then hands the filtered list of
-segments to be evaluated by C<where> and C<do>. A C<where> property is
-evaluated for each segment in turn, and if the C<where> evaluates to true,
-the C<do> code is immediately executed.
+Also, the rule algorithm takes the filter and goes over the whole word with it
+once, picking out those segments that pass through the filter. It then hands
+the filtered list of segments to be evaluated by C<where> and C<do>. A C<where>
+property, on the other hand, is evaluated for each segment in turn, and if the
+C<where> evaluates to true, the C<do> code is immediately executed.
 
 =back
 
@@ -834,46 +892,31 @@ Filters are primarily useful when you want to only see segments that meet a
 certain binary or scalar feature value, or when you want to avoid the
 magical segment-joining of a tier.
 
-=head2 Using domains
+=head2 Using result
 
-Domains, like tiers, change the segments that are visible to your rules. A
-domain, however, simply splits the word given to the rule into parts.
+The C<result> parameter is currently EXPERIMENTAL, and depends on the Whatif
+module, available from CPAN (but not for all architectures). You can do
+interesting things with it, but it's not yet guaranteed to always do those
+things.
 
-The value for a domain is the name of a feature. If the domain property is
-specified for a rule, the input word given to the rule will be broken into
-groups of segments whose value for that feature are references to the same
-value. For the execution of the rule, those groups of segments act as
-complete words with their own boundaries. For example:
+There are many linguistic processes where it is more accurate or convenient to
+stipulate a certain result, rather than certain preconditions. The C<result>
+parameter accomplishes this. You provide a code reference for the C<result>
+property, and after the C<do> is executed, the result is evaluated. If the
+result evaluates to true, the change is considered successful and life
+continues as normal. If the result evaluates to false, the change is "undone",
+and the word that you're operating on reverts to its previous state. (This
+undoing is devilishly hard to do by normal means. I tried to implement it
+without the Whatif module and nearly went crazy.)
 
-	@word = $symbols->segment('b','a','r','d','a','m');
+Some notes: The result code is only evaluated if the C<where> condition has
+already been evaluated as true. It is also only evaluated in the immediate
+context, with the segments in the same order as they were in the most recent
+where/do. If the result fails, both the code in the C<do> and the C<result>
+will be rolled back, but not the code in the C<where>.
 
-	# Syllable 1
-	$word[0]->SYLLABLE(1);
-	$word[1]->SYLLABLE($word[0]->value_ref('SYLLABLE'));
-	$word[2]->SYLLABLE($word[0]->value_ref('SYLLABLE'));
-
-	# Syllable 2
-	$word[3]->SYLLABLE(1);
-	$word[4]->SYLLABLE($word[3]->value_ref('SYLLABLE'));
-	$word[5]->SYLLABLE($word[3]->value_ref('SYLLABLE'));
-
-	# Make a rule to assign codas
-	$rules->add_rule( Coda => { domain => 'SYLLABLE',
-							     where => sub { $_[1]->BOUNDARY },
-								 do => sub { $_[0]->coda(1) }});
-	$rules->Coda(\@word);
-	# Now both the /r/ and the /m/ are marked as codas
-
-In this example, if we hadn't specified the domain 'SYLLABLE', only the /m/
-would have been marked as a coda, because only the /m/ would have been at a
-boundary. With the SYLLABLE domain, however, the input word is broken up
-into the two syllables, which act as their own words with respect to
-boundaries.
-
-When using domains and tiers together, the word is broken up into domains
-I<before> the tier is applied. Thus, two segments which might otherwise
-have been combined into a single pseudo-segment on a tier will not be
-combined if they fall into different domains.
+Using a result condition imposes a mild change on the way that insertion and
+deletion is handled--but see the next section for that.
 
 =head2 Writing insertion and deletion rules
 
@@ -890,8 +933,12 @@ automatically delete. A rule deleting coda consonants can be written thus:
 
 	# Assume that we have already assigned coda consonants to have the
 	# feature 'coda'
-	$rules->add_rule( DeleteCodaC => { where => sub { $_[0]->coda },
-	                                    do => sub { $_[0]->clear });
+	$rules->add_rule(
+		DeleteCodaC => {
+			where => sub { $_[0]->coda },
+	        do => sub { $_[0]->clear }
+		}
+	);
 
 As a side effect of this, if you provide input segments that have no
 features set, they will be silently deleted from output.
@@ -903,14 +950,23 @@ the segment object on which the method is called. For example, the
 following rule inserts a schwa to the left of a segment that is
 unsyllabified:
 
-	# Assume that we have a $symbols object defined with the default
-	# feature set and that we've already applied a syllabification
-	# algorithm that leaves some segments unparsed
-	$rules->add_rule( Epenthesize => { where => sub { not $_[0]->SYLLABLE },
-	                                   do => { $_[0]->INSERT_LEFT($symbols->segment('@'))});
+	$rules->add_rule(
+		Epenthesize => {
+			where => sub { not $_[0]->SYLLABLE },
+	        do => { $_[0]->INSERT_LEFT($symbols->segment('@')) }
+		}
+	);
 
 Note that the methods INSERT_RIGHT() and INSERT_LEFT() don't exist except
 inside the coderef for a rule.
+
+Note that the segments you insert or delete don't immediately (dis)appear.
+Instead, they wait in segment limbo until we're done iterating over the current
+word, and then are inserted/deleted all at once. Exception: when a C<result> is
+specified, segment deletion/insertion occurs right before the result code is
+evaluated. This is done purely to accomodate the most likely usage of
+C<result>: deleting a value and then checking that resulting consonants
+clusters are still valid.
 
 =head2 Developer goodies
 
@@ -918,12 +974,7 @@ Theres a couple of things here that are probably of no use to the average
 user, but have come in handywhen developing code for other modules or
 scripts to use. And who knows, you may have a use for them.
 
-First, any segment that has been inserted as part of the current rule will
-have a property C<_NEW>. This property will disappear as soon as the
-current rule finishes, so it is only useful if you want to know if a
-segment has been inserted in the very recent past.
-
-Second, all segments have the property C<_RULE> during the execution of a
+All segments have the property C<_RULE> during the execution of a
 rule. This method returns a hash reference that has keys corresponding to
 the properties of the currently executing rule. These properties include
 C<do, where, domain, tier, direction>, etc. If for some reason you need to
@@ -954,13 +1005,8 @@ Here's a silly example:
 
 =head1 TO DO
 
-I'd like to provide a library of exportable functions that perform common
-sorts of linguistic processes. Things like assimilate(), dissimilate(),
-epenthesize(), delete(), metathesize(), syllabify(), etc. This perhaps
-should go in a different module.
-
-The handling of insertion and deletion is also very ad-hoc. Better
-suggestions are welcome.
+The handling of insertion and deletion is very ad-hoc. Better suggestions are
+welcome.
 
 =head1 AUTHOR
 

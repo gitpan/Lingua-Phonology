@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use Test::More tests=>102;
+use Test::More tests=>108, todo=>[108];
 
 ##############################
 # BASIC TESTS                #
@@ -32,6 +32,9 @@ for ('node','privative','binary','scalar') {
 
 	# test the return of feature()
 	is($feat->feature("test_$_")->{type}, $_, "test feature() for $_");
+
+	# test return of feature_exists()
+	ok $feat->feature_exists("test_$_"), "test feature_exists() for $_";
 	
 	# test type()
 	is($feat->type("test_$_"), $_, "test type() for $_");
@@ -50,8 +53,11 @@ ok((not $feat->add_feature("test_nonesuch"=>{type=>'nonesuch'})), "test failure 
 # test the return of feature()
 ok((not $feat->feature("test_nonesuch")), "test failure of feature()");
 
+# test return of feature_exists
+ok((not $feat->feature_exists("test_nonesuch")), "test failure of feature_exists()");
+
 # test type()
-ok((not $feat->type("test_nonesuch")), "test failure of type()'");
+ok((not $feat->type("test_nonesuch")), "test failure of type()");
 
 # test change_feature()
 ok((not $feat->change_feature("test_nonesuch"=>{type=>'nonesuch'})), "test failure of change_feature()");
@@ -183,4 +189,10 @@ for my $i (0 .. $#vals) {
 		is($feat->number_form($_, $vals[$i]), $expected{num}{$_}[$i], "num for $_ on val $vals[$i]");
 		is($feat->text_form($_, $vals[$i]), $expected{text}{$_}[$i], "text for $_ on val $vals[$i]");
 	}
+}
+
+# Graph
+TODO: {
+	local $TODO = "\n  This test expected to fail if Graph module not available. See README for details.";
+	ok my $g = $feat->graph, 'get graph';
 }

@@ -27,20 +27,20 @@ most of these steps.
 
 DEPENDENCIES
 
-This module requires these other modules and libraries:
+Lingua::Phonology::Rules no longer depends on any other modules to run.
+However, it does include two recommended modules: Whatif and Graph. Graph is a
+standard Perl module and is probably available on your system. Whatif may be
+downloaded from CPAN if it isn't already available.
 
-	File::Basename
-	File::Spec
+If these modules *are* available, then you will get a few unexpected success
+messages when running make test, as if a TODO test had succeeded. These tests
+aren't actually TODO, though--they're only marked as such to indicate their
+optional nature. 
 
-I'd like to get rid of this dependency at some point in the future, so keep
-your eyes out for that. If you don't have these modules and are unwilling or
-unable to install them, be aware that Lingua::Phonology is still usable. The
-only loss is that the loading of default features will be disabled. You can,
-however, simply drag the files 'default.features' and 'default.symbols' from
-their homes and put them somewhere convenient for you. You'll find them in the
-same directory that Features.pm and Symbols.pm reside in.
+If these modules aren't available, you don't lose much--just one method from
+Lingua::Phonology::Features, and one parameter in Lingua::Phonology::Rules.
 
-COPYRIGHT AND LICENCE
+COPYRIGHT AND LICENSE
 
 Copyright (C) 2003 Jesse Bangs
 

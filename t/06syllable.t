@@ -74,7 +74,7 @@ ok $syll->min_nucl_son(1), 'set min_nucl_son';
 $syll->syllabify(@word);
 is spell_syll(@word), 's<kra><dwi><pnt>s', 'syllabify with min_nucl_son';
 
-# Force all V's to be nuclei
+# Force all Vs to be nuclei
 ok $syll->max_edge_son(2), 'set max_edge_son';
 $syll->syllabify(@word);
 is spell_syll(@word), 's<kra><du><i><pnt>s', 'syllabify with max_edge_son';

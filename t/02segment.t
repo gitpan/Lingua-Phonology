@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use Test::More tests=>27;
+use Test::More tests=>30;
 
 # Use the module
 BEGIN {
@@ -63,7 +63,9 @@ is(${$seg->value_ref('binary')}, 0, 'false value with value_ref()');
 # test nodes
 is(ref($seg->node), 'HASH', 'return value from node');
 ok($seg->node({binary=>1}), 'assign to node');
-is($seg->node->{binary}, 1, 'keys of node hashref');
+is(${$seg->value_ref('node')->{binary}}, 1, 'keys of node hashref from value_ref()');
+is($seg->node->{binary}, 1, 'keys of node hashref from value()');
+is($seg->value_text('node')->{binary}, '+', 'keys of node hashref from value_text()');
 
 # test assigning equivalent refs
 my $seg2 = $seg->new($feat2);
@@ -93,7 +95,7 @@ ok((not exists $vals{privative}), 'all_values() after delink()');
 $feat1->loadfile;
 $sym->loadfile;
 $seg->featureset($feat1);
-$seg->labial(1) && $seg->voice(1);
+$seg->labial(1) && $seg->voice(1) && $seg->continuant(0);
 is($seg->spell, 'b', 'successfull spell()');
 
 # failure of spell
@@ -108,5 +110,4 @@ for (keys %vals) {
 
 # clear
 $seg->clear;
-%vals = $seg->all_values;
-ok((not keys %vals), 'clear()');
+ok((not $seg->all_values), 'clear()');

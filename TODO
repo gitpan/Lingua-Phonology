@@ -22,14 +22,22 @@ in Features (will require some code revision).
 * Improve the Rules module for speed. Avoid the current bad implementation of
 deleting and altering segments.
 
-* Improve the Symbols module for speed.
+* Improve the Symbols module for speed. [Implemented in 0.2]
 
 * Rewrite the defaults for Features and Symbols so that we don't need the
 open_defaults function anymore (why didn't I just do this in the first place?).
+[Implemented in 0.2]
 
-* Allow for diacritics in the Symbols module.
+* Allow for diacritics in the Symbols module. [Implemented in 0.2]
 
 * Create a shell mode.
 
 * Create a loadfile method for Rules. This will be a major challenge, given the
 complexity of a rule.
+
+==============================
+
+Wishlist from 0.2:
+
+* Most of the things from 0.11 are still unimplemented (and perhaps should stay that way?)
+

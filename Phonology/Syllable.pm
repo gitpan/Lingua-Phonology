@@ -11,11 +11,6 @@ Lingua::Phonology::Syllable;
 	use Lingua::Phonology;
 	use Lingua::Phonology::Syllable;
 
-	# Create a new Phonology object and load the defaults
-	$phono = new Lingua::Phonology;
-	$phono->features->loadfile;
-	$phono->symbols->loadfile;
-
 	# Create a new Syllable object
 	$syll = new Lingua::Phonology::Syllable;
 
@@ -66,7 +61,7 @@ use Carp;
 use Lingua::Phonology::Rules;
 use Lingua::Phonology::Functions qw/adjoin/;
 
-our $VERSION = 0.11;
+our $VERSION = 0.2;
 
 # Properties to use, in name => default format
 our %bool = ( 
@@ -245,16 +240,19 @@ sub syllabify {
 	push(@opt, 'ComplexOnset') if $self->complex_onset;
 	push(@opt, 'Coda') if $self->coda;
 	push(@opt, 'ComplexCoda') if $self->complex_coda;
-	push(@opt, 'BeginAdjoin') if $self->begin_adjoin ne $code{begin_adjoin};
-	push(@opt, 'EndAdjoin') if $self->end_adjoin ne $code{end_adjoin};
+	push(@opt, 'BeginAdjoin') if $self->begin_adjoin != $code{begin_adjoin};
+	push(@opt, 'EndAdjoin') if $self->end_adjoin != $code{end_adjoin};
 	$self->{RULES}->order(@opt);
 
-	# Clear out boundary segments (if they're present)
-	# We're breaking symmetry here to avoid a warning
-	if ($_[0]->featureset->{BOUNDARY}) {
-		@_ = grep { not $_->BOUNDARY } @_;
+	# Are we in a rule (is BOUNDARY a feature?)
+	if ($_[0]->featureset->feature_exists('BOUNDARY')) {
+		# Rewind the word (it fucks us up to start in the middle)
+		unshift(@_, pop(@_)) while not $_[-1]->BOUNDARY;
+		# Get rid of boundary segments
+		pop @_ while $_[-1]->BOUNDARY;
 	}
 
+	# Apply
 	$self->{RULES}->apply_all(\@_);
 
 } # end syllabify

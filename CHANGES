@@ -1,3 +1,12 @@
+changes from v0.11
+* Removed Defaults.pm
+* Removed files default.features and default.segments (now included with their modules)
+* Added Boundary.pm
+* Modified the spelling algorithm for better speed (75%-125% better, in fact)
+* Added new symbols to the default set
+* Various minor documentation fixes
+* Various other code tweaks
+
 changes from v0.01
 * Added Syllable.pm
 * Added Functions.pm
