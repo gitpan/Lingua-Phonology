@@ -835,15 +835,15 @@ The symbols defined are as follows.
 	m	labial sonorant nasal -continuant
 
 	# Dental and alveolar
-	t	+anterior -distributed -continuant
-	d	+anterior -distributed voice -continuant
+	t	+anterior -continuant
+	d	+anterior voice -continuant
 	s	+anterior -distributed +continuant
 	z	+anterior -distributed voice +continuant 
 	T	+anterior +distributed +continuant
 	D	+anterior +distributed voice +continuant
-	n	+anterior -distributed sonorant nasal -continuant
-	l	+anterior -distributed sonorant lateral approximant
-	r	+anterior -distributed sonorant approximant
+	n	+anterior sonorant nasal -continuant
+	l	+anterior sonorant lateral approximant
+	r	+anterior sonorant approximant
 
 	# Palato-alveolar
 	tS	-anterior +distributed -continuant
@@ -857,7 +857,16 @@ The symbols defined are as follows.
 	s`	-anterior -distributed +continuant
 	z`	-anterior -distributed +continuant voice
 	n`	-anterior -distributed sonorant nasal -continuant
+	l`	-anterior -distributed sonorant lateral approximant
 	r`	-anterior -distributed sonorant approximant
+
+	# Palatal
+	c	-anterior dorsal -continuant
+	d\	-anterior dorsal -continuant voice
+	C	-anterior dorsal +continuant
+	j\	-anterior dorsal +continuant voice
+	J	-anterior dorsal -continuant sonorant nasal
+	L	-anterior dorsal sonorant lateral approximant
 
 	# Velar
 	k	dorsal -continuant
@@ -867,16 +876,22 @@ The symbols defined are as follows.
 	N	dorsal sonorant nasal -continuant
 
 	# Uvular
-	q	pharyngeal -continuant
-	G\	pharyngeal -continuant voice
-	X	pharyngeal +continuant
-	R	pharyngeal +continuant voice
-	N\	pharyngeal sonorant nasal -continuant
-	R\	pharyngeal sonorant approximant
+	q	dorsal pharyngeal -continuant
+	G\	dorsal pharyngeal -continuant voice
+	X	dorsal pharyngeal +continuant
+	R	dorsal pharyngeal +continuant voice
+	N\	dorsal pharyngeal sonorant nasal -continuant
+	R\	dorsal pharyngeal sonorant approximant
+
+	# Pharyngeal
+	q\	pharyngeal -continuant
+	X\	pharyngeal +continuant
+	?\	pharyngeal +continuant voice
 
 	# Glottal
 	?	-continuant
 	h	+continuant
+	h\	+continuant voice
 
 	# Vowels and vocoids
 	# High vowels
@@ -897,6 +912,7 @@ The symbols defined are as follows.
 	E	vocoid approximant sonorant aperture=1 -anterior 
 	o	vocoid approximant sonorant aperture=1 dorsal labial tense
 	O	vocoid approximant sonorant aperture=1 dorsal labial
+	V	vocoid approximant sonorant aperture=1 dorsal
 	2	vocoid approximant sonorant aperture=1 -anterior labial tense
 	9	vocoid approximant sonorant aperture=1 -anterior labial
 	@	vocoid approximant sonorant aperture=1
@@ -905,6 +921,18 @@ The symbols defined are as follows.
 	# Low vowels
 	a	vocoid approximant sonorant aperture=2
 	Q	vocoid approximant sonorant aperture=2 labial
+
+	# Diacritics
+	*_0		*voice
+	*_v		voice
+	*_h		spread
+	*_~		constricted
+	*_w		labial
+	*_G		dorsal
+	*_?\	pharyngeal
+	*_d		+distributed # Diacritic for "dental"
+	*~		nasal
+	*_l		lateral
 
 These symbols depend upon the default feature set. If you aren't using the
 default feature set, you're on your own. If you've modified the default

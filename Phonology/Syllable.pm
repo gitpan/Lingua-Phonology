@@ -61,7 +61,7 @@ use Carp;
 use Lingua::Phonology::Rules;
 use Lingua::Phonology::Functions qw/adjoin/;
 
-our $VERSION = 0.2;
+our $VERSION = 0.25;
 
 # Properties to use, in name => default format
 our %bool = ( 
@@ -99,7 +99,8 @@ sub new {
 	my $proto = shift;
 	my $class = ref($proto) || $proto;
 	my $self = { RULES => new Lingua::Phonology::Rules,
-				 ATTR => {} };
+				 ATTR => {}
+	};
 	
 	# Initialize $self
 	$self->{ATTR}->{$_} = $bool{$_} for keys(%bool);
@@ -112,38 +113,61 @@ sub new {
 		CalcSon => {
 			do => sub { $_[0]->SON($self->sonority($_[0])) }
 		},
+
 		Clear => {
 			where => sub { &{$self->clear_seg}(@_) },
-			do => sub { $_[0]->delink('SYLL', 'onset', 'Rime', 'nucleus', 'coda') }
+			do => sub {
+				$_[0]->delink('SYLL', 'onset', 'Rime', 'nucleus', 'coda');
+			}
 		},
+
 		CoreSyll => {
 			where => sub {
 				my $son = $_[0]->SON;
 				return 0 if defined $_[0]->SYLL;
-				return (($son > $self->max_edge_son) || (($son >= $self->min_nucl_son) && ($son >= $_[-1]->SON && $son >= $_[1]->SON)));
+				return (
+					($son > $self->max_edge_son) ||  # Can't be an edge OR
+					(
+						($son >= $self->min_nucl_son) && # Is allowed to be a nucleus AND
+						($son >= $_[-1]->SON && $son >= $_[1]->SON) # Is a local sonority peak
+					)
+				);
 			},
 			do => sub {
-				$_[0]->nucleus(1) && $_[0]->Rime(1) && $_[0]->SYLL(1);
-				if ($_[-1]->SON <= $_[0]->SON && $_[-1]->SON <= $self->max_edge_son && not $_[-1]->SYLL) {
-					$_[-1]->onset(1) && adjoin('SYLL', $_[0], $_[-1]);
+				$_[0]->nucleus(1) && $_[0]->Rime(1) && $_[0]->SYLL(1); # Make yourself a nucleus
+				if (
+					$_[-1]->SON <= $_[0]->SON &&
+				    $_[-1]->SON <= $self->max_edge_son &&
+					not $_[-1]->SYLL
+				) {
+					$_[-1]->onset(1) && adjoin('SYLL', $_[0], $_[-1]); # make it an onset in this syll
 				}
 			}
 		},
+
 		ComplexOnset => {
 			direction => 'leftward',
-			where => sub { (not $_[0]->SYLL)
-						   && $_[1]->onset
-						   && $_[0]->SON <= $self->max_edge_son
-						   && (($_[1]->SON - $_[0]->SON) >= $self->min_son_dist) },
+			where => sub {
+				(not $_[0]->SYLL) &&
+				$_[1]->onset &&
+				$_[0]->SON <= $self->max_edge_son &&
+				(($_[1]->SON - $_[0]->SON) >= $self->min_son_dist)
+			},
 			do => sub { adjoin('onset', $_[1], $_[0]) && adjoin('SYLL', $_[1], $_[0]) }
 		},
+
 		Coda => {
 			where => sub { (not $_[0]->onset)
 						   && $_[-1]->nucleus
 						   && $_[0]->SON <= $self->max_edge_son
 						   && $_[0]->SON >= $self->min_coda_son },
-			do => sub { $_[0]->coda(1) && $_[0]->delink('nucleus'), adjoin('Rime', $_[-1], $_[0]) && adjoin('SYLL', $_[-1], $_[0]) }
+			do => sub { $_[0]->coda(1) &&
+					    $_[0]->delink('nucleus') &&
+						adjoin('Rime', $_[-1], $_[0]) &&
+						adjoin('SYLL', $_[-1], $_[0])
+					  }
 		},
+
 		ComplexCoda => {
 			direction => 'rightward',
 			where => sub { (not $_[0]->SYLL)
@@ -153,6 +177,7 @@ sub new {
 						   && (($_[-1]->SON - $_[0]->SON) >= $self->min_son_dist) },
 			do => sub { adjoin('coda', $_[-1], $_[0]) && adjoin('Rime', $_[-1], $_[0]) && adjoin('SYLL', $_[-1], $_[0]) }
 		},
+
 		BeginAdjoin => {
 			direction => 'leftward',
 			where => sub {
@@ -167,6 +192,7 @@ sub new {
 			},
 			do => sub { adjoin('onset', $_[1], $_[0]) && adjoin('SYLL', $_[1], $_[0]) }
 		},
+
 		EndAdjoin => {
 			direction => 'rightward',
 			where => sub {
@@ -180,7 +206,13 @@ sub new {
 				return ($cond1 && $cond2);
 			},
 			do => sub { adjoin('coda', $_[-1], $_[0]) && adjoin('Rime', $_[-1], $_[0]) && adjoin('SYLL', $_[-1], $_[0]) }
+		},
+
+		# This rule exists purely for data-collection purposes (see count_unparsed)
+		Unparsed => {
+			where => sub { not $_[0]->SYLL },
 		}
+
 	);
 
 	# Be blessed
@@ -225,6 +257,11 @@ apply the rule.
 sub syllabify {
 	my $self = shift;
 
+	# Check for valid input
+	for (@_) {
+		return err("Bad input to syllabify()") unless UNIVERSAL::isa($_, 'Lingua::Phonology::Segment');
+	}
+
 	# Add the necessary features
 	$_[0]->featureset->add_feature(
 		SYLL => { type => 'scalar' },
@@ -232,7 +269,7 @@ sub syllabify {
 		Rime => { type => 'privative' },
 		nucleus => { type => 'privative' },
 		coda => { type => 'privative' },
-		SON => { type => 'scalar' }
+		SON => { type => 'scalar' },
 	);
 
 	# Optimize the rule order
@@ -242,20 +279,46 @@ sub syllabify {
 	push(@opt, 'ComplexCoda') if $self->complex_coda;
 	push(@opt, 'BeginAdjoin') if $self->begin_adjoin != $code{begin_adjoin};
 	push(@opt, 'EndAdjoin') if $self->end_adjoin != $code{end_adjoin};
+	push(@opt, 'Unparsed');
 	$self->{RULES}->order(@opt);
 
-	# Are we in a rule (is BOUNDARY a feature?)
-	if ($_[0]->featureset->feature_exists('BOUNDARY')) {
+	# Are we in a rule (are these really RuleSegments)?
+	if (UNIVERSAL::isa($_[0], 'Lingua::Phonology::RuleSegment')) {
 		# Rewind the word (it fucks us up to start in the middle)
 		unshift(@_, pop(@_)) while not $_[-1]->BOUNDARY;
 		# Get rid of boundary segments
 		pop @_ while $_[-1]->BOUNDARY;
 	}
 
-	# Apply
+	# Apply all rules
 	$self->{RULES}->apply_all(\@_);
 
 } # end syllabify
+
+=head2 count_syll
+
+This is a simple data-collection method that takes no arguments. It returns the
+number of syllables created in the most recent call to C<syllabify>.
+
+=cut
+
+sub count_syll {
+	my $self = shift;
+	$self->{RULES}->count->{CoreSyll};
+}
+
+=head2 count_unparsed
+
+This is another data-collection method that takes no arguments. It returns the
+number of segments that were left unparsed in the most recent call to
+C<syllabify>.
+
+=cut
+
+sub count_unparsed {
+	my $self = shift;
+	$self->{RULES}->count->{Unparsed};
+}
 
 =head2 sonority
 

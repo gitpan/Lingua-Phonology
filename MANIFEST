@@ -11,6 +11,7 @@ Phonology/Features.pm
 Phonology/Functions.pm
 Phonology/PseudoSegment.pm
 Phonology/Rules.pm
+Phonology/RuleSegment.pm
 Phonology/Segment.pm
 Phonology/Syllable.pm
 Phonology/Symbols.pm

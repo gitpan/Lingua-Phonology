@@ -83,15 +83,15 @@ algorithm.
 use strict;
 use warnings::register;
 use Carp;
-use Data::Dumper;
-use Lingua::Phonology::Segment;
+use Lingua::Phonology::Features;
 use Lingua::Phonology::PseudoSegment;
+use Lingua::Phonology::RuleSegment;
 use Lingua::Phonology::Boundary;
 BEGIN {
 	eval 'sub whatif (&;$) {}' if not eval 'use Whatif; 1';
 }
 
-our $VERSION = 0.2;
+our $VERSION = 0.3;
 
 =head1 METHODS
 
@@ -105,11 +105,12 @@ arguments.
 sub new {
 	my $proto = shift;
 	my $class = ref($proto) || $proto;
-	my $self = { RULES => { },
+	my $self = { RULES => { }, # list of rules
 				 BOUND => Lingua::Phonology::Boundary->new(new Lingua::Phonology::Features),
-				 ORDER => [ ],
-				 PERSIST => [ ],
-				 COUNT => 0 };
+				 ORDER => [ ], # rule order
+				 PERSIST => [ ], # list of persistent rules
+				 COUNT => 0, # count of times a rule applied, set by apply or apply_all
+	};
 	bless ($self, $class);
 	return $self;
 } # end new
@@ -292,45 +293,31 @@ instead.
 
 =cut
 
-# Features we use
-our %features = ( BOUNDARY => { type => 'privative' },
-				  INSERT_RIGHT => { type => 'scalar' },
-				  INSERT_LEFT => { type => 'scalar' },
-				  _RULE => { type => 'scalar' }
-);
-
 sub apply {
 	my ($self, $rule, $orig) = @_;
 
 	return err("No such rule $rule") if not exists($self->{RULES}->{$rule});
 
-	return err("Bad arguments to apply()") if ref($orig) ne 'ARRAY';
-	return 0 if not @$orig;
+	# Check type of input
+	return err("Argument to apply() must be an array reference") if ref($orig) ne 'ARRAY';
+	return undef if not @$orig;
 	
 	# Check that we have good segments
 	for (@$orig) {
 		if (not UNIVERSAL::isa($_, 'Lingua::Phonology::Segment')) {
-			return err("Bad arguments to apply()");
+			return err("Arguments to apply() must be in the Lingua::Phonology::Segment class");
 		}
 	}
-	
-	# Assume that all segments share a featureset, and add our pseudo-features to that set
-	$orig->[0]->featureset->add_feature(%features); 
+
+	# Return segments blessed into the RuleSegment class
+	# TODO: What if we don't have a hashref?
+	my @temp = map { bless { %$_ }, 'Lingua::Phonology::RuleSegment' } @$orig;
 	
 	# Reset the counter
 	$self->{COUNT} = 0;
 
-	# Set up domains, if they exist
-	my @domains = ();
-	if ($self->{RULES}->{$rule}->{domain}) {
-		@domains = _make_domain($self->{RULES}->{$rule}->{domain}, @$orig);
-	}
-	else {
-		@domains = ($orig);
-	}
-
 	# Iterate over the domains/segments
-	for (@domains) {
+	foreach (_make_domain($self->{RULES}->{$rule}->{domain}, @temp)) {
 		# Readability
 		my @word = @$_;
 
@@ -348,9 +335,6 @@ sub apply {
 		push (@word, $self->{BOUND});
 		unshift (@word, $self->{BOUND});
 
-		# Make properties available via _RULE
-		$_->_RULE($self->{RULES}->{$rule}) for (@word);
-
 		# Rotate to starting positions
 		my $next;
 		if ($self->{RULES}->{$rule}->{direction} eq 'leftward') {
@@ -367,12 +351,10 @@ sub apply {
 			if (&{$self->{RULES}->{$rule}->{where}}(@word)) {
 
 				# If we're using result
-				my $result = $self->{RULES}->{$rule}->{result};
-				if ($result) {
+				if (my $result = $self->{RULES}->{$rule}->{result}) {
 					whatif {
 						&{$self->{RULES}->{$rule}->{do}}(@word);
-						@word = _cleanup(@word); # this is convenient for many reasons
-						die if not &$result(@word);
+						die if not &$result(_cleanup(@word));
 						$self->{COUNT}++;
 					};
 				}
@@ -381,11 +363,6 @@ sub apply {
 					# Apply the rule
 					&{$self->{RULES}->{$rule}->{do}}(@word);
 					$self->{COUNT}++;
-				}
-
-				# If the 'do' destroyed our feature(s), put them back
-				if (not $word[0]->featureset->feature_exists('BOUNDARY')) {
-					$word[0]->featureset->add_feature(%features);
 				}
 
 			} # end if
@@ -398,16 +375,20 @@ sub apply {
 	} # end for
 
 	# Clean up the word
-	@$orig = _cleanup(@$orig);
-
-	# Remove our temporary feature settings
-	for my $feature (keys(%features)) {
-		$_->delink($feature) for (@$orig);
-		$orig->[0]->featureset->drop_feature($feature);
-	} # end for
-
+	@$orig = grep { defined($_) && $_->all_values }
+			 map { $_->INSERT_LEFT, shift(@$orig), $_->INSERT_RIGHT }
+			 @temp;
+		
 	return @$orig;
 } #end if
+
+# Return only list elements that have some values set and include
+# INSERT_LEFT and INSERT_RIGHT segments
+sub _cleanup {
+	grep { defined($_) && $_->all_values }
+	map { ($_->INSERT_LEFT, $_, $_->INSERT_RIGHT) }
+	@_;
+}
 
 # A simplistic func to flatten hashrefs into easily comparable strings
 sub _flatten {
@@ -475,14 +456,6 @@ sub _leftward {
 	return @_;
 } # end rotate
 
-# Return only list elements that have some values set and include
-# INSERT_LEFT and INSERT_RIGHT segments
-sub _cleanup {
-	grep { defined($_) && $_->all_values }
-	map { ($_->INSERT_LEFT, $_, $_->INSERT_RIGHT) }
-	@_;
-}
-
 # Makes rules appliable by their name
 our $AUTOLOAD;
 sub AUTOLOAD {
@@ -509,7 +482,7 @@ sub AUTOLOAD {
 		eval qq! sub $method {
 			my \$self = shift;
 			my \$rule = shift;
-			return err("no such rule '\$rule'") if not exists \$self->{RULES}->{\$rule};
+			return err("No such rule '\$rule'") if not exists \$self->{RULES}->{\$rule};
 			my \$ruleref = \$self->{RULES}->{\$rule};
 			\$ruleref->{$method} = shift if \@_;
 			return \$ruleref->{$method};
@@ -546,7 +519,7 @@ thing that count() returns after a call to apply_all(). See L<"count"> below.
 sub apply_all {
 	my ($self, $word) = @_;
 	my %count = ();
-	
+
 	my @persist = $self->persist; # Only get this once, for speed
 	for ($self->order) {
 		for (@persist) {
@@ -556,8 +529,6 @@ sub apply_all {
 		$self->apply($_, $word);
 		$count{$_} += $self->{COUNT};
 	} # end for
-
-	# Apply persistent rules one last time before finishing
 	for (@persist) {
 		$self->apply($_, $word);
 		$count{$_} += $self->{COUNT};

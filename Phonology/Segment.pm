@@ -46,7 +46,7 @@ use warnings::register;
 use Carp;
 use Lingua::Phonology::Features;
 
-our $VERSION = 0.2;
+our $VERSION = 0.25;
 
 =head1 METHODS
 
@@ -442,7 +442,8 @@ L<"all_values">() after calling clear() will return an empty hash.
 
 sub clear {
 	my $self = shift;
-	$self->{VALUES} = {};
+	%{$self->{VALUES}} = ();
+	return 1;
 } # end clear
 
 # Allows you to call changes to feature settings directly

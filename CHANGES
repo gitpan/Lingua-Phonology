@@ -1,4 +1,15 @@
-changes from v0.11
+=============================
+Changes from v0.2 to v0.25
+
+This was a bug-fix update from 0.2, but the bug-fix proved to be fairly major,
+so I warranted giving it a half-step increment in version number.
+
+* Resolved conflicts between Syllable.pm and Rules.pm
+* Added RuleSegment.pm
+* Added two minor methods to the Syllable class
+
+=============================
+Changes from v0.11 to 0.2
 * Removed Defaults.pm
 * Removed files default.features and default.segments (now included with their modules)
 * Added Boundary.pm
@@ -7,11 +18,11 @@ changes from v0.11
 * Various minor documentation fixes
 * Various other code tweaks
 
-changes from v0.01
+=============================
+Changes from v0.01 to v0.11
 * Added Syllable.pm
 * Added Functions.pm
 * Modified the rule algorithm for better speed
 * Added new features and symbols
-* Added Syllables.pm to Phonology package
 * Updated/edited documentation
 * Vastly expanded the test suite

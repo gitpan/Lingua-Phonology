@@ -16,22 +16,18 @@ This module is strictly for internal use by Lingua::Phonology::Rules.
 
 use strict;
 use warnings;
-use Lingua::Phonology::Segment;
-our @ISA = qw(Lingua::Phonology::Segment);
+use Lingua::Phonology::RuleSegment;
+our @ISA = qw(Lingua::Phonology::RuleSegment);
 
-our $VERSION = 0.1;
+our $VERSION = 0.2;
 
-# Inherit all methods possible from above. Overwrite only value_ref()
-
+# Never have any other feature value
 sub value_ref {
-	my ($self, $feature) = @_;
-
-	if ($feature eq 'BOUNDARY') {
-		return \1;
-	}
-	else {
-		return undef;
-	}
+	return undef;
+}
+# Always be a boundary
+sub BOUNDARY {
+	return 1;
 }
 
 # Castrate delink(), too
@@ -41,6 +37,7 @@ sub delink {}
 sub all_values {
 	return (BOUNDARY => 1);
 }
+ 1;
 
 =head1 AUTHOR
 

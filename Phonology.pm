@@ -102,7 +102,7 @@ use Lingua::Phonology::Symbols;
 use Lingua::Phonology::Rules;
 use Lingua::Phonology::Syllable;
 
-our $VERSION = 0.2;
+our $VERSION = 0.25;
 
 =head1 METHODS
 
