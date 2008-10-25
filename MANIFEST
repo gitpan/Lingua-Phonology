@@ -29,3 +29,4 @@ t/08lingrules.t
 t/09word.t
 t/test.xml
 t/test_rules.xml
+META.yml                                 Module meta-data (added by MakeMaker)

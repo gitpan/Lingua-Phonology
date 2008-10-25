@@ -421,7 +421,7 @@ sub graph {
 	my $g = Graph->new();
 	for my $feature (keys %$self) {
 		$g->add_vertex($feature);
-		$g->set_attribute('type', $feature, $self->type($feature));
+		$g->set_vertex_attribute($feature, 'type', $self->type($feature));
 		for ($self->children($feature)) {
 			$g->add_edge($feature, $_);
 		}

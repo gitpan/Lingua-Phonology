@@ -1,0 +1,14 @@
+--- #YAML:1.0
+name:                Lingua-Phonology
+version:             0.33
+abstract:            a module providing a unified way to deal with
+license:             ~
+generated_by:        ExtUtils::MakeMaker version 6.36
+distribution_type:   module
+requires:     
+    B::Deparse:                    0.63
+    Parse::RecDescent:             1.9
+    XML::Simple:                   2.08
+meta-spec:
+    url:     http://module-build.sourceforge.net/META-spec-v1.2.html
+    version: 1.2

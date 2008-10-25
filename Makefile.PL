@@ -8,7 +8,7 @@ our $prereqs = {
     B::Deparse => 0.63
 };
 
-askfor({'Whatif' => 1.0, 'Graph' => 0.2});
+askfor({'Whatif' => 1.0, 'Graph' => 0.5});
 
 WriteMakefile (
 	NAME			=> 'Lingua::Phonology',
@@ -21,17 +21,7 @@ sub askfor {
     my $href = shift;
 	for (keys %$href) {
 		if (not eval "use $_; 1") {
-			$resp = prompt (<<EOT
-
-It looks like you don't have the $_ module available. Though this module isn't
-required to use Lingua::Phonology, if you install it you will have access to a
-few extra features.  If you'd like, I can add this module to the list of
-prerequisites for Lingua::Phonology, which will (probably) cause your module
-installer to automatically fetch it for you.
-
-Add $_ to list of prerequisites?
-EOT
-			, "yes");
+			$resp = prompt ("Add optional module $_ as a prerequisite to be installed?", "yes");
 
 			if ($resp =~ /^y/i) {
 				$prereqs->{$_} = $href->{$_};

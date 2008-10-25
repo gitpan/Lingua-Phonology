@@ -47,7 +47,7 @@ for ('node','privative','binary','scalar') {
 
     # make sure the feature was dropped
     ok((not $feat->feature_exists("test_$_")), "feature $_ dropped");
-} # end if
+}
 
 # test failure cases for preceding functions
 # 4 tests in this block
@@ -165,6 +165,7 @@ my %expected = (
 		scalar => [0, 1, '*', '', '-', '+', '*']
 	}
 );
+
 for my $i (0 .. $#vals) {
 	for ('privative', 'binary', 'scalar') {
 		no warnings 'uninitialized'; # To avoid warnings w/ expected undefs
