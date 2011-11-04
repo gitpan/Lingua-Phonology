@@ -8,21 +8,28 @@ Lingua::Phonology::Syllable;
 
 =head1 SYNOPSIS
 
-	use Lingua::Phonology;
-	use Lingua::Phonology::Syllable;
+    use Lingua::Phonology;
+    use Lingua::Phonology::Syllable;
 
-	# Create a new Syllable object
-	$syll = new Lingua::Phonology::Syllable;
+    my $phono = Lingua::Phonology->new();
+    $phono->features->loadfile;
+    $phono->symbols->loadfile;
 
-	# Create an input word
-	@word = $phono->symbol->segment('t','a','k','r','o','t');
+    # Create a new Syllable object
+    my $syll = new Lingua::Phonology::Syllable;
 
-	# Allow onset clusters and simple codas
-	$syll->set_complex_onset;
-	$syll->set_coda;
+    # Create an input word
+    my @word = $phono->symbols->segment('t','a','k','r','o','t');
 
-	# Syllabify the word
-	$syll->syllabify(@word);
+    # Allow onset clusters and simple codas
+    $syll->set_complex_onset;
+    $syll->set_coda;
+
+    # Syllabify the word
+    $syll->syllabify(@word);
+
+    my $count = $syll->count_syll;
+    print "Count: $count\n"; # prints "Count: 2"
 
 	# @word now has features set to indicate a syllabification of
 	# <ta><krot>

@@ -96,9 +96,10 @@ use Lingua::Phonology::Word;
 use Lingua::Phonology::Segment::Rules;
 use Lingua::Phonology::Segment::Boundary;
 use Lingua::Phonology::Segment::Tier;
+
 # use Whatif if it's available
 BEGIN {
-	eval { sub whatif (&;$) {} } unless eval { use Whatif; 1; };
+	eval { sub whatif (&;$) {} } unless eval "use Whatif; 1";
 }
 
 our $VERSION = 0.3;

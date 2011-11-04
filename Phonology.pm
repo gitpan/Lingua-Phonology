@@ -2,7 +2,7 @@
 
 package Lingua::Phonology;
 
-$VERSION = 0.33;
+$VERSION = 0.34;
 
 use strict;
 use warnings;
@@ -308,7 +308,6 @@ $phono->symbols->segment($foo) >>.
     # Load phonology definition from a file
     $phono->loadfile('phono.xml');
 
-
 This method can be used to either load the defaults for all modules that come
 with defaults (currently Lingua::Phonology::Features and
 Lingua::Phonology::Symbols), or to load a phonology definition from a file.
@@ -374,7 +373,11 @@ L<Lingua::Phonology::FileFormatPOD>
 
 =head1 AUTHOR
 
-Jesse S. Bangs <F<jaspax@u.washington.edu>>.
+Jesse S. Bangs <F<jaspax@cpan.org>>.
+
+This module is no longer actively maintained, though it does get occasional
+bugfixes. It has been superceded by a command-line tool called C<phonix>, which
+can be found at F<http://phonix.googlecode.com>.
 
 =head1 LICENSE
 
