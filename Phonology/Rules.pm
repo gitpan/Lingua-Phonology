@@ -71,13 +71,6 @@ always true.
 B<do> - defines the action to take when the C<where> condition is met. Must be
 a code reference. If no value is given, does nothing.
 
-=item * 
-
-B<result> - EXPERIMENTAL. Defines a condition that must be true after the C<do>
-code has applied. Must be a code reference that returns a truth value. B<NOTE>:
-This parameter depends on the module Whatif (available from CPAN), and will
-behave differently if this module is not present. See L<"Using result">.
-
 =back
 
 Lingua::Phonology::Rules is flexible and powerful enough to handle any 
@@ -96,11 +89,6 @@ use Lingua::Phonology::Word;
 use Lingua::Phonology::Segment::Rules;
 use Lingua::Phonology::Segment::Boundary;
 use Lingua::Phonology::Segment::Tier;
-
-# use Whatif if it's available
-BEGIN {
-	eval { sub whatif (&;$) {} } unless eval "use Whatif; 1";
-}
 
 our $VERSION = 0.3;
 
@@ -578,21 +566,9 @@ sub apply {
     while ($word->next) {
         my @word = $word->get_working_segs;
         if ($where->(@word)) {
-            # If we're using result
-            if ($result) {
-                whatif {
-                    $do->(@word);
-                    die if not $result->($word->get_working_segs);
-                    $self->{COUNT}++;
-                };
-            }
-
-            # Normal case
-            else {
-                # Apply the rule
-                $do->(@word);
-                $self->{COUNT}++;
-            }
+            # Apply the rule
+            $do->(@word);
+            $self->{COUNT}++;
         } 
     }
 
@@ -1197,32 +1173,6 @@ C<where> evaluates to true, the C<do> code is immediately executed.
 Filters are primarily useful when you want to only see segments that meet a
 certain binary or scalar feature value, or when you want to avoid the magical
 segment-joining of a tier.
-
-=head2 Using result
-
-The C<result> parameter is currently EXPERIMENTAL, and depends on the Whatif
-module, available from CPAN (but not for all architectures). You can do
-interesting things with it, but it's not yet guaranteed to always do those
-things.
-
-There are many linguistic processes where it is more accurate or convenient to
-stipulate a certain result, rather than certain preconditions. The C<result>
-parameter accomplishes this. You provide a code reference for the C<result>
-property, and after the C<do> is executed, the result is evaluated. If the
-result evaluates to true, the change is considered successful and life
-continues as normal. If the result evaluates to false, the change is "undone",
-and the word that you're operating on reverts to its previous state. (This
-undoing is devilishly hard to do by normal means. I tried to implement it
-without the Whatif module and nearly went crazy.)
-
-Some notes: The result code is only evaluated if the C<where> condition has
-already been evaluated as true. It is also only evaluated in the immediate
-context, with the segments in the same order as they were in the most recent
-where/do. If the result fails, both the code in the C<do> and the C<result>
-will be rolled back, but not the code in the C<where>.
-
-Using a result condition imposes a mild change on the way that insertion and
-deletion is handled--but see the next section for that.
 
 =head2 Writing insertion and deletion rules
 

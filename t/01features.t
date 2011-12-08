@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 98;
+use Test::More tests => 97;
 
 ##############################
 # BASIC TESTS                #
@@ -172,10 +172,4 @@ for my $i (0 .. $#vals) {
 		is($feat->number_form($_, $vals[$i]), $expected{num}{$_}[$i], "num for $_ on val $vals[$i]");
 		is($feat->text_form($_, $vals[$i]), $expected{text}{$_}[$i], "text for $_ on val $vals[$i]");
 	}
-}
-
-# Graph
-TODO: {
-	local $TODO = "\n  This test expected to fail if Graph module not available. See README for details.";
-	ok my $g = $feat->graph, 'get graph';
 }

@@ -409,27 +409,6 @@ sub _to_str {
     return eval { _string_from_struct({ features => { feature => $struct } }) };
 }
 
-# Get a Graph object
-sub graph {
-    require Graph or do {
-		carp err "Can't call graph: Graph module not available";
-        return;
-	};
-
-	my $self = shift;
-
-	my $g = Graph->new();
-	for my $feature (keys %$self) {
-		$g->add_vertex($feature);
-		$g->set_vertex_attribute($feature, 'type', $self->type($feature));
-		for ($self->children($feature)) {
-			$g->add_edge($feature, $_);
-		}
-	}
-
-	return $g;
-}
-
 # The following coderefs translate arbitrary data into numeric equivalents
 # respecting common linguistic abbreviations like [+foo, -bar, *baz]
 my %num_form = (
@@ -734,17 +713,6 @@ Lines beginning with a '#' are assumed to be comments and are skipped.
 
 This method does NOT load the default features any more. Only C<loadfile()>
 does that.
-
-=head2 graph
-
-    my $g = $features->graph();
-
-Takes no arguments. Returns an object in the Graph class indicating the
-structure of the current Lingua::Phonology::Features object. You may use this
-graph for printing or other analysis, if you'd like.
-
-You must have the Graph module installed for this function to work. If you do
-not have Graph installed, you will get an error.
 
 =head2 number_form
 

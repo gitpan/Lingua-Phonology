@@ -1,4 +1,9 @@
 =============================
+Changes from v0.34 to 0.35
+* Removed the graph() method from Features.pm
+* Removed the experimental result property of Rules.pm
+
+=============================
 Changes from v0.3 to 0.32
 * Added ability to load linguistic rules with add_rule
 * Added Word.pm to make rules more robust
@@ -18,8 +23,8 @@ Changes from v0.25 to 0.3
 
 =============================
 Changes from v0.2 to v0.25
-
-* Resolved conflicts between Syllable.pm and Rules.pm Added RuleSegment.pm
+* Resolved conflicts between Syllable.pm and Rules.pm 
+* Added RuleSegment.pm
 * Added two minor methods to the Syllable class
 
 =============================

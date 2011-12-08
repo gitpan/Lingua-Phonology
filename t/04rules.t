@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 74;
+use Test::More tests => 65;
 
 BEGIN {
 	use_ok('Lingua::Phonology::Rules');
@@ -29,8 +29,7 @@ my $testrule = {
 	direction => 'leftward',
 	filter => sub {},
 	where => sub {},
-	do => sub {},
-	result => sub {}
+	do => sub {}
 };
 my $setrule = {
 	tier => 'new tier',
@@ -38,10 +37,9 @@ my $setrule = {
 	direction => 'rightward',
 	filter => sub {},
 	where => sub {},
-	do => sub {},
-	result => sub {}
+	do => sub {}
 };
-my @methods = ('tier', 'domain', 'direction', 'filter', 'where','do','result');
+my @methods = ('tier', 'domain', 'direction', 'filter', 'where','do');
 
 # test assigning the rule
 ok($rules->add_rule(test => $testrule), 'add via add_rule');
@@ -57,9 +55,6 @@ ok((not $rules->add_rule(fail => { where => 'no way' })), 'add_rule failure on b
 
 # failure on bad do
 ok((not $rules->add_rule(fail => { do => 'not even' })), 'add_rule failure on bad do');
-
-# failure on bad result
-ok((not $rules->add_rule(fail => { result => 'not this either' })), 'add_rule failure on bad result');
 
 # change a rule
 ok $rules->change_rule(test => $setrule), 'change w/ change_rule';
@@ -221,44 +216,6 @@ $phono->symbols->drop_symbol('j','w');
     is_deeply \@caught, [ @word[0,2] ], 'filters: correct segments filtered';
 
     $rules->drop_rule('filters');
-}
-
-# Test result: failure
-{
-    my @word = $phono->symbols->segment(split //, 'dada');
-    
-    $rules->add_rule(
-        results => {
-            where => sub { $_[0]->vocoid },
-            do => sub { $_[0]->clear },
-            result => sub {0}
-        }	
-    );
-
-    ok $rules->results(\@word), 'result fails: apply result rule';
-    is $phono->symbols->spell(@word), 'dada', 'result fails: all segments unchanged';
-
-    $rules->drop_rule('results');
-}
-
-# Test result: success
-TODO: {
-    local $TODO = "\n  This test expected to fail except when the Whatif module is available.
-        See README for details.";
-    my @word = $phono->symbols->segment(split //, 'dada');
-
-    $rules->add_rule(
-        results => {
-            where => sub { $_[0]->vocoid },
-            do => sub { $_[0]->clear },
-            result => sub {1}
-        }
-    );
-
-    ok $rules->results(\@word), 'result succeeds: apply result rule';
-    is $phono->symbols->spell(@word), 'dd', 'result succeeds: segments dropped of result voicing';
-
-    $rules->drop_rule('results');
 }
 
 # Make sure INSERT_RIGHT, INSERT_LEFT, and delete work properly

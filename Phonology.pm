@@ -2,7 +2,7 @@
 
 package Lingua::Phonology;
 
-$VERSION = 0.34;
+$VERSION = 0.35;
 
 use strict;
 use warnings;
