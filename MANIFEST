@@ -29,4 +29,5 @@ t/08lingrules.t
 t/09word.t
 t/test.xml
 t/test_rules.xml
-META.yml                                 Module meta-data (added by MakeMaker)
+META.yml                                 Module YAML meta-data (added by MakeMaker)
+META.json                                Module JSON meta-data (added by MakeMaker)
