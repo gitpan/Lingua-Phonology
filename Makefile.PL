@@ -4,7 +4,7 @@ use ExtUtils::MakeMaker qw(WriteMakefile prompt);
 
 our $prereqs = {
     XML::Simple => 2.08,
-    Parse::RecDescent => 1.9,
+    Parse::RecDescent => 1.0,
     B::Deparse => 0.63
 };
 

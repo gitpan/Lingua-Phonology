@@ -33,11 +33,11 @@
       "runtime" : {
          "requires" : {
             "B::Deparse" : "0.63",
-            "Parse::RecDescent" : "1.9",
+            "Parse::RecDescent" : "1",
             "XML::Simple" : "2.08"
          }
       }
    },
    "release_status" : "stable",
-   "version" : "0.351"
+   "version" : "0.352"
 }

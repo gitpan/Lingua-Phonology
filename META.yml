@@ -19,6 +19,6 @@ no_index:
     - inc
 requires:
   B::Deparse: 0.63
-  Parse::RecDescent: 1.9
+  Parse::RecDescent: 1
   XML::Simple: 2.08
-version: 0.351
+version: 0.352
